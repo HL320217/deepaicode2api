@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -52,7 +53,10 @@ func TestGraphMailImport(t *testing.T) {
 		t.Fatal("merge failed to preserve or update entries")
 	}
 	info, err := os.Stat(s.graphMailPath())
-	if err != nil || info.Mode().Perm() != 0600 {
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0600 {
 		t.Fatalf("permissions: %v %v", info, err)
 	}
 	r = do(t, s, http.MethodPost, "/admin/api/register/graph-mail", "", `{"content":"invalid"}`)

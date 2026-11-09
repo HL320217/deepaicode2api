@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"deepaicode2api/internal/deepai"
+	"deepaicode2api/internal/googleauth"
 	"deepaicode2api/internal/registry"
 	"deepaicode2api/internal/store"
 )
@@ -25,7 +26,9 @@ type Server struct {
 	Store *store.Store
 	Up    *deepai.Client
 	// Login 保存进行中的浏览器登录会话（内存态）。
-	Login *loginSessions
+	Login       *loginSessions
+	Google      *googleTasks
+	googleLogin func(context.Context, googleauth.Credential, func(string, string)) (*deepai.Credentials, error)
 	// Registers 保存批量注册任务（内存态）。
 	Registers *registerJobs
 
@@ -41,7 +44,7 @@ type Server struct {
 // New 构造服务。
 func New(st *store.Store) *Server {
 	return &Server{
-		Store: st, Up: deepai.NewClient(), Login: newLoginSessions(),
+		Store: st, Up: deepai.NewClient(), Login: newLoginSessions(), Google: &googleTasks{},
 		Registers: newRegisterJobs(), proxyClients: map[string]*deepai.Client{},
 		quotaReprobeDelays: quotaReprobeDelays,
 	}
@@ -93,6 +96,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/admin/api/models", s.withAdminAuth(s.handleAdminModels))
 	mux.HandleFunc("/admin/api/login/start", s.withAdminAuth(s.handleLoginStart))
 	mux.HandleFunc("/admin/api/login/poll", s.withAdminAuth(s.handleLoginPoll))
+	mux.HandleFunc("/admin/api/google/accounts", s.withAdminAuth(s.handleGoogleAccounts))
+	mux.HandleFunc("/admin/api/google/start", s.withAdminAuth(s.handleGoogleStart))
+	mux.HandleFunc("/admin/api/google/status", s.withAdminAuth(s.handleGoogleStatus))
+	mux.HandleFunc("/admin/api/google/cancel", s.withAdminAuth(s.handleGoogleAction))
+	mux.HandleFunc("/admin/api/google/skip", s.withAdminAuth(s.handleGoogleAction))
 	mux.HandleFunc("/admin/api/register/graph-mail", s.withAdminAuth(s.handleGraphMail))
 	mux.HandleFunc("/admin/api/register", s.withAdminAuth(s.handleAdminRegister))
 	// 浏览器登录跳转：session id 是一次性随机数，服务端只跳到固定的上游登录页。

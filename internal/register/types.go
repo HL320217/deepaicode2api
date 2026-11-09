@@ -9,8 +9,11 @@
 package register
 
 import (
+	"errors"
 	"strings"
 	"time"
+
+	"deepaicode2api/internal/deepai"
 )
 
 // 记录状态（等级见 rank）。
@@ -40,11 +43,12 @@ func StatusRank(status string) int { return rank[status] }
 // 字段同时是台账行、交付物行和控制台进度行；密码 / Session 只在本地台账
 // 与状态文件中保存（文件权限 0600）。
 type Record struct {
-	Key    string `json:"key"` // 唯一键：邮箱
-	Email  string `json:"email"`
-	Status string `json:"status"`
-	Stage  string `json:"stage,omitempty"`
-	Error  string `json:"error,omitempty"`
+	Key       string `json:"key"` // 唯一键：邮箱
+	Email     string `json:"email"`
+	Status    string `json:"status"`
+	Stage     string `json:"stage,omitempty"`
+	Error     string `json:"error,omitempty"`
+	ErrorCode string `json:"error_code,omitempty"`
 	// LastError 只在“本次比历史更差”时保留原因，避免覆盖历史成功记录。
 	LastError string  `json:"last_error,omitempty"`
 	CreatedAt float64 `json:"created_at"`
@@ -123,6 +127,16 @@ func (r *Record) SetError(stage string, err error) {
 	r.Stage = stage
 	r.Status = StatusFailed
 	r.Error = err.Error()
+	r.ErrorCode = ""
+	var upstream *deepai.HTTPError
+	if errors.As(err, &upstream) {
+		r.ErrorCode = upstream.Code()
+		if stage == "validate" && upstream.Status == 403 && r.ErrorCode == "social_login_required" && r.APIKey != "" {
+			r.Status = StatusRegistered
+			r.Mark(stage, "blocked", 0)
+			r.Error = "账号已注册，但 DeepAI Code 未授权：上游要求 Google 或 Apple 登录。请在「账号池 → 浏览器登录」导入符合条件的账号。原始错误：" + err.Error()
+		}
+	}
 }
 
 // Normalize 修正空键并规范化分组。
@@ -275,6 +289,7 @@ func mergeRecord(dst, src *Record) {
 	}
 	if src.Error != "" {
 		dst.Error = src.Error
+		dst.ErrorCode = src.ErrorCode
 	}
 	if src.APIKey != "" {
 		dst.APIKey = src.APIKey

@@ -25,6 +25,7 @@ type graphAccount struct {
 type graphProvider struct {
 	accounts []*graphAccount
 	byEmail  map[string]*graphAccount
+	skipped  map[string]bool // preflight failures are skipped for the remainder of this provider's batch
 	path     string
 	client   *http.Client
 }
@@ -192,6 +193,9 @@ func (p *graphProvider) Reserve(email string) (Mailbox, error) {
 		}
 	} else {
 		for _, candidate := range p.accounts {
+			if p.skipped[strings.ToLower(candidate.email)] {
+				continue
+			}
 			if status := state[strings.ToLower(candidate.email)]; status == "" || status == "available" {
 				a = candidate
 				break
@@ -225,6 +229,50 @@ type graphInbox struct {
 func (m *graphInbox) Email() string    { return m.a.email }
 func (m *graphInbox) Provider() string { return "graph" }
 func (m *graphInbox) Fresh() bool      { return false }
+
+// Health checks actual Graph read permission before an upstream account is created.
+func (m *graphInbox) Health(ctx context.Context) error {
+	token, err := m.token(ctx)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		"https://graph.microsoft.com/v1.0/me/messages?$top=1&$select=id", nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := m.p.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("Graph 收信预检失败: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("Graph 收信预检失败（HTTP %d）：请重新授权 Microsoft Graph Mail.Read；IMAP/POP 权限不能用于 Graph 收信", resp.StatusCode)
+	}
+	return nil
+}
+
+// Release returns an unused reservation to the pool after preflight fails.
+func (m *graphInbox) Release() error {
+	graphStateMu.Lock()
+	defer graphStateMu.Unlock()
+	state, err := m.p.readState()
+	if err != nil {
+		return err
+	}
+	key := strings.ToLower(m.a.email)
+	if state[key] != "pending" {
+		return nil
+	}
+	delete(state, key)
+	if m.p.skipped == nil {
+		m.p.skipped = map[string]bool{}
+	}
+	m.p.skipped[key] = true
+	return m.p.writeState(state)
+}
+
 func (m *graphInbox) token(ctx context.Context) (string, error) {
 	a := m.a
 	a.mu.Lock()
@@ -253,6 +301,9 @@ func (m *graphInbox) token(ctx context.Context) (string, error) {
 		return "", errors.New("Graph 令牌响应无效")
 	}
 	if resp.StatusCode != 200 || out.Access == "" {
+		if out.Error == "invalid_grant" || out.Error == "invalid_scope" {
+			return "", fmt.Errorf("Graph 令牌刷新失败（HTTP %d，%s）：请重新授权 Microsoft Graph Mail.Read 和 offline_access 后重新导入；IMAP/POP 令牌不能用于 Graph 收信", resp.StatusCode, out.Error)
+		}
 		return "", fmt.Errorf("Graph 令牌刷新失败（HTTP %d，%s）", resp.StatusCode, out.Error)
 	}
 	a.access = out.Access

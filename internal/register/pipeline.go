@@ -132,6 +132,20 @@ func (p *Pipeline) runOne(ctx context.Context, email, password, proxyOverride, f
 	rec.Email, rec.Key = email, email
 	rec.MailboxProvider = mb.Provider()
 	rec.Mark("mailbox", "ok", time.Since(t))
+	if checker, ok := mb.(HealthProvider); ok && p.opts.Verify {
+		t = time.Now()
+		if err := checker.Health(ctx); err != nil {
+			if releaser, ok := mb.(interface{ Release() error }); ok {
+				if releaseErr := releaser.Release(); releaseErr != nil {
+					p.logf("[%s] 释放未使用邮箱失败：%v", email, releaseErr)
+				}
+			}
+			rec.Mark("mailbox_check", "failed", time.Since(t))
+			rec.SetError("mailbox_check", fmt.Errorf("邮箱收信授权检查失败，尚未提交注册: %w", err))
+			return p.finish(rec)
+		}
+		rec.Mark("mailbox_check", "ok", time.Since(t))
+	}
 	p.logf("[%s] 邮箱就绪（%s）", email, mb.Provider())
 
 	// 指纹：补跑优先复用；否则按邮箱稳定分配，保证同一账号请求头一致。
@@ -654,7 +668,7 @@ func (p *Pipeline) RunRecords(ctx context.Context, records []*Record, concurrenc
 
 // resumeWithKey 在只有 API Key 的情况下补验活 / 补入池。
 func (p *Pipeline) resumeWithKey(ctx context.Context, old *Record) *Record {
-	rec := *old
+	rec := cloneRecord(old)
 	rec.Group = firstNonEmpty(rec.Group, p.effectiveGroup())
 	if strings.TrimSpace(rec.Proxy) == "" && p.opts.ProxyPool != nil {
 		rec.Proxy = p.opts.ProxyPool.Next()
@@ -667,19 +681,19 @@ func (p *Pipeline) resumeWithKey(ctx context.Context, old *Record) *Record {
 	if strings.TrimSpace(rec.MachineID) == "" {
 		rec.MachineID = deepai.NewMachineUUID()
 	}
-	if err := p.validate(ctx, &rec, up); err != nil {
+	if err := p.validate(ctx, rec, up); err != nil {
 		rec.Mark("validate", "failed", time.Since(t))
-		rec.Error = err.Error()
-		rec.Status = StatusFailed
-		_ = p.opts.Ledger.Append(&rec)
-		p.notify(&rec)
-		return &rec
+		rec.SetError("validate", err)
+		_ = p.opts.Ledger.Append(rec)
+		p.notify(rec)
+		return rec
 	}
+	rec.Error, rec.ErrorCode, rec.LastError = "", "", ""
 	rec.Status = StatusKeyed
 	rec.Mark("validate", "ok", time.Since(t))
 	if p.opts.Enroller != nil {
 		t = time.Now()
-		id, err := p.opts.Enroller.Enroll(ctx, &rec)
+		id, err := p.opts.Enroller.Enroll(ctx, rec)
 		if err != nil {
 			rec.Mark("enroll", "failed", time.Since(t))
 			rec.Error = "入池失败: " + err.Error()
@@ -692,7 +706,7 @@ func (p *Pipeline) resumeWithKey(ctx context.Context, old *Record) *Record {
 	if rec.FinishedAt == 0 {
 		rec.FinishedAt = float64(time.Now().UnixNano()) / 1e9
 	}
-	merged := Merge(old, &rec)
+	merged := Merge(old, rec)
 	_ = p.opts.Ledger.Append(merged)
 	p.notify(merged)
 	return merged

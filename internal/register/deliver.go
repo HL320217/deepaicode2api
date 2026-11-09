@@ -29,7 +29,7 @@ func WriteDeliverables(dir string, records []*Record) (*Deliverables, error) {
 
 	byEmail := map[string]*Record{}
 	for _, rec := range records {
-		if rec == nil || rec.APIKey == "" {
+		if rec == nil || !rec.WorthDelivering() {
 			continue
 		}
 		rec.Normalize()
@@ -83,13 +83,15 @@ func WriteDeliverables(dir string, records []*Record) (*Deliverables, error) {
 
 // Summary 汇总一次运行的结果。
 type Summary struct {
-	Total     int
-	Enrolled  int
-	Keyed     int
-	Verified  int
-	Failed    int
-	WithKey   int
-	VerifiedE int
+	Total      int
+	Registered int
+	Enrolled   int
+	Keyed      int
+	Verified   int
+	Failed     int
+	WithKey    int
+	Usable     int
+	VerifiedE  int
 }
 
 // Summarize 统计记录。
@@ -101,6 +103,8 @@ func Summarize(records []*Record) Summary {
 		}
 		s.Total++
 		switch rec.Status {
+		case StatusRegistered:
+			s.Registered++
 		case StatusEnrolled:
 			s.Enrolled++
 		case StatusKeyed:
@@ -112,6 +116,9 @@ func Summarize(records []*Record) Summary {
 		}
 		if rec.APIKey != "" {
 			s.WithKey++
+		}
+		if rec.WorthDelivering() {
+			s.Usable++
 		}
 		if rec.EmailVerified {
 			s.VerifiedE++

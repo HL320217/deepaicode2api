@@ -1,0 +1,10 @@
+services:
+  deepaicode2api:
+    build:
+      context: .
+      target: browser
+    environment:
+      DEEPAI_GOOGLE_HEADLESS: ${DEEPAI_GOOGLE_HEADLESS:-false}
+      DEEPAI_GOOGLE_BROWSER: /usr/bin/chromium-browser
+      DEEPAI_GOOGLE_PROXY: ${DEEPAI_GOOGLE_PROXY:-}
+    shm_size: "256mb"

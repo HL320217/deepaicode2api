@@ -37,6 +37,10 @@ import (
 var version = "dev"
 
 func main() {
+	os.Exit(run())
+}
+
+func run() int {
 	var (
 		count         = flag.Int("count", 1, "注册数量")
 		concurrency   = flag.Int("concurrency", 1, "并发数")
@@ -67,7 +71,7 @@ func main() {
 
 	if *showVer {
 		fmt.Println("deepaicode2api-register", version)
-		return
+		return 0
 	}
 
 	cfg := register.LoadConfig()
@@ -142,14 +146,14 @@ func main() {
 		}
 		fmt.Printf("结果：可用 %d / %d\n", len(results)-bad, len(results))
 		if bad > 0 {
-			os.Exit(1)
+			return 1
 		}
-		return
+		return 0
 	}
 
 	if *doctor {
 		printDoctor(cfg, pool)
-		return
+		return 0
 	}
 
 	if *count < 1 || *count > 200 {
@@ -250,7 +254,7 @@ func main() {
 		}
 		if len(pending) == 0 {
 			fmt.Println("台账里没有需要补跑的账号。")
-			return
+			return 0
 		}
 		fmt.Printf("补跑 %d 个账号…\n", len(pending))
 		records = pipe.RunRecords(ctx, pending, *concurrency)
@@ -289,10 +293,10 @@ func main() {
 	}
 
 	summary := register.Summarize(records)
-	fmt.Printf("\n完成，用时 %s：总计 %d，入池 %d，有 Key %d，邮箱已验证 %d，失败 %d\n",
-		time.Since(start).Round(time.Second), summary.Total, summary.Enrolled, summary.WithKey, summary.VerifiedE, summary.Failed)
+	fmt.Printf("\n完成，用时 %s：总计 %d，入池 %d，已注册未验活 %d，有 Key %d，可用 Key %d，邮箱已验证 %d，失败 %d\n",
+		time.Since(start).Round(time.Second), summary.Total, summary.Enrolled, summary.Registered, summary.WithKey, summary.Usable, summary.VerifiedE, summary.Failed)
 
-	if summary.WithKey > 0 {
+	if summary.Usable > 0 {
 		out, err := register.WriteDeliverables(*resultDir, records)
 		if err != nil {
 			fmt.Printf("写交付物失败: %v\n", err)
@@ -301,9 +305,10 @@ func main() {
 		}
 	}
 
-	if summary.WithKey == 0 {
-		os.Exit(1)
+	if summary.Usable == 0 {
+		return 1
 	}
+	return 0
 }
 
 func printDoctor(cfg *register.Config, pool *register.ProxyPool) {

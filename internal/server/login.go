@@ -101,6 +101,21 @@ func (s *Server) handleLoginStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	session, err := s.createLoginSession()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error(), "server_error")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"session_id": session.ID,
+		"open_url":   "/login/open?id=" + url.QueryEscape(session.ID),
+		"port":       session.Port,
+		"expires_in": int(loginTTL.Seconds()),
+	})
+}
+
+// createLoginSession is shared by interactive and automatic Google sign-in.
+func (s *Server) createLoginSession() (*loginSession, error) {
 	id := deepai.RandomHex(16)
 	state := deepai.RandomToken(32)
 	session := &loginSession{ID: id, State: state, Created: time.Now()}
@@ -131,8 +146,7 @@ func (s *Server) handleLoginStart(w http.ResponseWriter, r *http.Request) {
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "无法启动本机回调: "+err.Error(), "server_error")
-		return
+		return nil, fmt.Errorf("无法启动本机回调: %w", err)
 	}
 	port := ln.Addr().(*net.TCPAddr).Port
 	session.Port = port
@@ -140,12 +154,7 @@ func (s *Server) handleLoginStart(w http.ResponseWriter, r *http.Request) {
 	go func() { _ = session.srv.Serve(ln) }()
 	s.Login.put(session)
 
-	writeJSON(w, http.StatusOK, map[string]any{
-		"session_id": id,
-		"open_url":   "/login/open?id=" + url.QueryEscape(id),
-		"port":       port,
-		"expires_in": int(loginTTL.Seconds()),
-	})
+	return session, nil
 }
 
 // handleLoginOpen 跳转到上游登录页。

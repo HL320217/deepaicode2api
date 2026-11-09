@@ -1,7 +1,7 @@
 // DeepAICode2API 把本机 DeepAI Code 桌面端的上游模型服务，
 // 逆向复刻成一个 OpenAI / Anthropic 兼容的 Go 网关。
 //
-// 复用桌面端已登录的 API Key，无需另申请密钥；纯 Go 标准库实现。
+// 复用桌面端已登录的 API Key；Google 号池通过本机 Chromium 自动授权。
 package main
 
 import (

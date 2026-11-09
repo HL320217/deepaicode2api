@@ -156,6 +156,7 @@ func sanitizeRegisterRecord(rec *register.Record) map[string]any {
 		"status":           rec.Status,
 		"stage":            rec.Stage,
 		"error":            rec.Error,
+		"error_code":       rec.ErrorCode,
 		"last_error":       rec.LastError,
 		"key":              deepai.MaskSecret(rec.APIKey),
 		"account_id":       rec.AccountID,

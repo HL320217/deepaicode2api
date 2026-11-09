@@ -1,0 +1,23 @@
+services:
+  deepaicode2api:
+    image: ${DEEPAI2API_IMAGE:-ghcr.io/hl320217/deepaicode2api:latest-browser}
+    ports:
+      - "127.0.0.1:10087:10087"
+    environment:
+      DEEPAI2API_HOST: 0.0.0.0
+      DEEPAI2API_PORT: "10087"
+      DEEPAI2API_DATA_PATH: /data/deepaicode2api-data.json
+      DEEPAI2API_ADMIN_PASSWORD: ${DEEPAI2API_ADMIN_PASSWORD:?Set the admin password in .env}
+      DEEPAI2API_MASTER_KEY: ${DEEPAI2API_MASTER_KEY:?Set the encryption key in .env}
+      DEEPAI_API_KEY: ${DEEPAI_API_KEY:-}
+      DEEPAI_MACHINE_ID: ${DEEPAI_MACHINE_ID:-}
+      DEEPAI_GOOGLE_HEADLESS: ${DEEPAI_GOOGLE_HEADLESS:-false}
+      DEEPAI_GOOGLE_PROXY: ${DEEPAI_GOOGLE_PROXY:-}
+    volumes:
+      - deepai-data:/data
+    shm_size: "256mb"
+    stop_grace_period: 30s
+    restart: unless-stopped
+
+volumes:
+  deepai-data:

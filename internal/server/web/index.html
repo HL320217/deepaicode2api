@@ -129,6 +129,9 @@ body.signed-out .login-screen{display:flex}
 .login-card label{font-weight:600;color:var(--fg)}.login-card input[type=password]{width:100%;background:var(--panel2);height:44px}
 .login-card .login-submit{width:100%;margin-top:18px;height:44px}.login-error{min-height:20px;color:var(--err);font-size:12px;margin-top:8px}.login-footer{border-top:1px solid var(--line);margin-top:24px;padding-top:18px;color:var(--dim);font-size:12px}
 @media(max-width:480px){.login-card{padding:26px}}
+.google-pool{margin-bottom:24px}.google-pool .register-layout{margin-top:18px}.google-pool h3{font-size:14px;margin:0 0 12px}.google-pool .card-subtitle{max-width:72ch}.google-pool .google-controls{display:flex;flex-wrap:wrap;gap:10px;margin:16px 0}.google-pool .google-controls .btn{min-height:44px}.google-pool .google-status{min-height:48px;margin:16px 0;overflow-wrap:anywhere}.google-pool .google-progress{width:100%;height:8px;accent-color:var(--accent)}.google-pool .google-logs{max-height:220px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px}.google-pool .google-message{max-width:320px;overflow-wrap:anywhere}.google-pool .google-import{border-top:1px solid var(--line);padding-top:14px;margin-top:14px}.google-pool .google-import .row{margin-top:12px}.google-pool input[type=file]{max-width:100%}.google-pool .google-search{max-width:220px;width:100%}.google-pool .google-controls button:focus-visible{outline:2px solid var(--accent);outline-offset:3px}.google-pool button{transition:background-color .15s ease,border-color .15s ease}.google-pool .google-summary{font-size:13px;color:var(--dim);margin-top:8px}
+.google-pool .register-layout>*{min-width:0}.google-pool .google-status{white-space:pre-line}.google-pool .table-wrap{max-width:100%}
+@media(prefers-reduced-motion:reduce){.google-pool button{transition:none}}
 </style>
 </head>
 <body class="signed-out">
@@ -243,6 +246,28 @@ body.signed-out .login-screen{display:flex}
 
   <section id="tab-register">
     <div class="page-heading"><div><h1>邮箱与注册</h1><p>导入邮箱、安排注册任务，并跟踪每个账号的处理状态。</p></div><div class="heading-actions"><button class="btn" id="openImport">导入邮箱文件</button><button class="btn primary" id="openRegister">创建注册任务</button></div></div>
+    <div class="card google-pool" id="googlePool">
+      <div class="card-heading"><div><h2>Google 号池 · 自动授权</h2><p class="card-subtitle">支持 Gmail、Google 企业和教育账号。程序使用账密登录 Google，再通过 DeepAI 官方授权取得 Key。</p></div><button class="btn" id="googleReload" type="button">刷新状态</button></div>
+      <div class="google-summary" id="googleSummary">尚未导入 Google 账号</div>
+      <div class="register-layout">
+        <div>
+          <label for="googleSearch">搜索 Google 邮箱</label><input class="google-search" id="googleSearch" type="search" placeholder="邮箱地址">
+          <div class="table-wrap"><table><thead><tr><th>Google 邮箱</th><th>状态</th><th>当前步骤 / 结果</th></tr></thead><tbody id="googleAccounts"></tbody></table></div>
+          <div class="mail-pager"><span id="googlePageInfo" class="muted">共 0 条</span><div><button class="btn" id="googlePrev" type="button">上一页</button> <button class="btn" id="googleNext" type="button">下一页</button></div></div>
+          <details class="google-import"><summary>导入 Google 账密文件</summary><label for="googleFile">UTF-8 文本文件（最多 1000 个账号）</label><div class="row"><input id="googleFile" type="file" accept=".txt,text/plain"><button class="btn" id="googleImport" type="button">导入并合并号池</button></div><p class="hint">每行：邮箱----Google密码，也支持制表符或 | 分隔。重复邮箱更新密码并保留授权结果，已授权账号自动跳过。</p><div id="googleImportStatus" class="muted" role="status" aria-live="polite"></div></details>
+        </div>
+        <div class="task-card">
+          <h3>自动登录 Google → 授权 DeepAI</h3>
+          <label for="googleCount">本次授权数量（1–1000）</label><input id="googleCount" type="number" min="1" max="1000" value="1">
+          <label class="checkbox" for="googleRetry"><input id="googleRetry" type="checkbox">重试失败或跳过的账号</label>
+          <p class="hint">浏览器会在运行网关的电脑上逐个打开。遇到验证码、双重验证或企业 SSO 时，请在该浏览器处理，完成后程序自动继续。每个账号最多等待 10 分钟。</p>
+          <div class="google-controls"><button class="btn primary" id="googleStart" type="button">开始自动授权</button><button class="btn" id="googleSkip" type="button" disabled>跳过当前账号</button><button class="btn danger" id="googleCancel" type="button" disabled>停止任务</button></div>
+          <div class="google-status" id="googleStatus" role="status" aria-live="polite">暂无授权任务</div>
+          <progress class="google-progress" id="googleProgress" max="1" value="0" aria-label="Google 授权进度"></progress>
+          <details><summary>查看授权日志</summary><pre class="google-logs" id="googleLogs">暂无日志</pre></details>
+        </div>
+      </div>
+    </div>
     <div class="mail-kpis" id="graphSummary"><div class="kpi"><div class="k">邮箱总数</div><div class="v">—</div></div><div class="kpi"><div class="k">可用邮箱</div><div class="v">—</div></div><div class="kpi"><div class="k">已注册</div><div class="v">—</div></div><div class="kpi"><div class="k">待确认</div><div class="v">—</div></div></div>
     <div class="register-layout">
       <div class="card mail-card">
@@ -658,6 +683,7 @@ body.signed-out .login-screen{display:flex}
       renderSettings(d.settings || {});
       loadHealth();
       loadGraphMail();
+      loadGooglePool();
     }).catch(function(e){
       toast("加载失败：" + e.message + (e.status===401 ? "\n请在右上角填写管理密码" : ""), "err");
     });
@@ -950,6 +976,83 @@ body.signed-out .login-screen{display:flex}
       pollRegister(r.id);
     }).catch(function(e){ toast("启动失败：" + e.message, "err"); });
   };
+
+  // --- Google 号池与自动授权（密码仅从文件发送，不存于浏览器状态） ---
+  var googleAccounts = [], googlePage = 0, googleTimer = null, googleLoading = false, googleLoadPromise = null, googleWasActive = false;
+  var googleNames = {available:"可用",queued:"等待中",running:"登录中",action_required:"需要处理",authorized:"已授权",failed:"失败"};
+  function renderGoogleAccounts(){
+    var query = $("#googleSearch").value.trim().toLowerCase();
+    var accounts = googleAccounts.filter(function(a){return !query || a.email.toLowerCase().includes(query);});
+    googlePage = Math.max(0, Math.min(googlePage, Math.ceil(accounts.length / 20) - 1));
+    var rows = $("#googleAccounts"); rows.textContent = "";
+    var slice = accounts.slice(googlePage * 20, (googlePage + 1) * 20);
+    slice.forEach(function(a){
+      var status = cell(""); status.appendChild(pill(googleNames[a.status] || a.status, a.status === "authorized" ? "ok" : a.status === "failed" ? "err" : a.status === "action_required" ? "warn" : ""));
+      rows.appendChild(row([cell(a.email),status,cell(a.message || "等待自动登录", "google-message muted")]));
+    });
+    if (!slice.length) rows.appendChild(emptyRow(3,query ? "没有匹配的 Google 账号" : "导入 Google 账密文件后，即可开始自动授权"));
+    $("#googlePageInfo").textContent = "共 " + accounts.length + " 条 · 第 " + (googlePage + 1) + " 页";
+    $("#googlePrev").disabled = googlePage === 0;
+    $("#googleNext").disabled = (googlePage + 1) * 20 >= accounts.length;
+    var counts = {available:0,authorized:0,failed:0,action_required:0};
+    googleAccounts.forEach(function(a){if(counts[a.status] !== undefined) counts[a.status]++;});
+    $("#googleSummary").textContent = "共 " + googleAccounts.length + " 个 · 可用 " + counts.available + " · 已授权 " + counts.authorized + " · 失败 " + counts.failed + (counts.action_required ? " · 需要处理 " + counts.action_required : "");
+  }
+  function loadGooglePool(force){
+    if (!signedIn) return Promise.resolve();
+    if (googleLoading) return force === true ? googleLoadPromise.then(function(){return loadGooglePool(true);}) : googleLoadPromise;
+    googleLoading = true;
+    if (googleTimer) {clearTimeout(googleTimer);googleTimer=null;}
+    googleLoadPromise = Promise.all([api("/admin/api/google/accounts"),api("/admin/api/google/status")]).then(function(results){
+      if (!signedIn) return;
+      googleAccounts = results[0].accounts || []; renderGoogleAccounts();
+      var task = results[1], active = task.status === "running" || task.status === "cancelling";
+      $("#googleStart").disabled = active || !googleAccounts.length;
+      $("#googleImport").disabled = active;
+      $("#googleSkip").disabled = task.status !== "running" || !task.email;
+      $("#googleCancel").disabled = task.status !== "running";
+      $("#googleProgress").max = task.total || 1;
+      $("#googleProgress").value = (task.succeeded || 0) + (task.failed || 0) + (task.skipped || 0);
+      $("#googleLogs").textContent = (task.logs || []).join("\n") || "暂无日志";
+      var counts = "成功 " + (task.succeeded || 0) + " · 失败 " + (task.failed || 0) + " · 跳过 " + (task.skipped || 0);
+      if (active) $("#googleStatus").textContent = (task.status === "cancelling" ? "正在关闭浏览器…" : "正在处理 " + task.current + "/" + task.total + " · " + (task.email || "")) + "\n" + (task.message || "正在启动") + "\n" + counts;
+      else $("#googleStatus").textContent = task.status === "idle" ? "暂无授权任务" : (task.status === "cancelled" ? "任务已停止 · " : "任务已结束 · ") + counts;
+      if (active) googleTimer = setTimeout(loadGooglePool, 2000);
+      var finished = googleWasActive && !active;
+      googleWasActive = active;
+      if (finished) refresh();
+    }).catch(function(e){$("#googleStatus").textContent = "状态读取失败：" + e.message; if(signedIn) googleTimer=setTimeout(loadGooglePool,5000);}).finally(function(){googleLoading=false;});
+    return googleLoadPromise;
+  }
+  $("#googleSearch").oninput = function(){googlePage=0;renderGoogleAccounts();};
+  $("#googlePrev").onclick = function(){googlePage--;renderGoogleAccounts();};
+  $("#googleNext").onclick = function(){googlePage++;renderGoogleAccounts();};
+  $("#googleReload").onclick = function(){loadGooglePool(true);};
+  $("#googleImport").onclick = async function(){
+    var file = $("#googleFile").files[0];
+    if (!file || file.size > 3 * 1024 * 1024) {$("#googleImportStatus").textContent="请选择不超过 3 MB 的账密文本文件";return;}
+    this.disabled=true; $("#googleImportStatus").textContent="正在导入…";
+    try {
+      var result=await api("/admin/api/google/accounts",{method:"POST",body:{content:await file.text()}});
+      $("#googleFile").value="";
+      $("#googleImportStatus").textContent="导入完成：新增 " + result.added + " 个，更新 " + result.updated + " 个";
+      await loadGooglePool(true);
+    } catch(e){$("#googleImportStatus").textContent="导入失败：" + e.message;}
+    finally {this.disabled=false;}
+  };
+  $("#googleStart").onclick = async function(){
+    var count=Number($("#googleCount").value);
+    if(!Number.isInteger(count) || count<1 || count>1000){$("#googleStatus").textContent="授权数量必须为 1–1000";$("#googleCount").focus();return;}
+    this.disabled=true; $("#googleStatus").textContent="正在启动自动授权…";
+    try {await api("/admin/api/google/start",{method:"POST",body:{count:count,retry_failed:$("#googleRetry").checked}});await loadGooglePool(true);}
+    catch(e){$("#googleStatus").textContent="启动失败：" + e.message;this.disabled=false;}
+  };
+  function googleAction(action){
+    $("#googleSkip").disabled=true;$("#googleCancel").disabled=true;
+    return api("/admin/api/google/"+action,{method:"POST",body:{}}).then(function(){return loadGooglePool(true);}).catch(function(e){$("#googleStatus").textContent="操作失败："+e.message;});
+  }
+  $("#googleSkip").onclick=function(){googleAction("skip");};
+  $("#googleCancel").onclick=function(){googleAction("cancel");};
 
   // --- 浏览器登录 ---
   var oauthTimer = null, oauthSid = null, oauthDeadline = 0;

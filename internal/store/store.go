@@ -69,20 +69,22 @@ type Stats struct {
 
 // State 是全部持久化状态。
 type State struct {
-	Accounts      []*deepai.Account `json:"accounts"`
-	Keys          []*APIKey         `json:"keys"`
-	Settings      Settings          `json:"settings"`
-	Stats         Stats             `json:"stats"`
-	Logs          []LogEntry        `json:"logs"`
-	Models        []deepai.Model    `json:"models"`
-	DefaultModel  string            `json:"default_model"`
-	ModelsUpdated int64             `json:"models_updated"`
-	MachineID     string            `json:"machine_id"`
+	Accounts       []*deepai.Account `json:"accounts"`
+	GoogleAccounts []*GoogleAccount  `json:"google_accounts,omitempty"`
+	Keys           []*APIKey         `json:"keys"`
+	Settings       Settings          `json:"settings"`
+	Stats          Stats             `json:"stats"`
+	Logs           []LogEntry        `json:"logs"`
+	Models         []deepai.Model    `json:"models"`
+	DefaultModel   string            `json:"default_model"`
+	ModelsUpdated  int64             `json:"models_updated"`
+	MachineID      string            `json:"machine_id"`
 }
 
 // Store 是带锁的状态容器。
 type Store struct {
 	mu     sync.RWMutex
+	saveMu sync.Mutex
 	path   string
 	st     *State
 	rotate int
@@ -161,6 +163,7 @@ func OpenWithKey(path string, key []byte) (*Store, error) {
 	default:
 		return nil, err
 	}
+	s.recoverGoogleAccounts()
 	return s, nil
 }
 
@@ -172,6 +175,8 @@ func (s *Store) Path() string { return s.path }
 // 内容与上次落盘一致时直接跳过：后台每 30s 调一次 Save，日志/统计没变化时
 // 没必要反复重写整个状态文件。
 func (s *Store) Save() error {
+	s.saveMu.Lock()
+	defer s.saveMu.Unlock()
 	s.mu.RLock()
 	plain, err := json.MarshalIndent(s.st, "", "  ")
 	key := s.masterKey

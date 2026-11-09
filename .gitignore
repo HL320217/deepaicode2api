@@ -36,6 +36,8 @@ coverage.out
 # 本地测试 / 逆向产物
 /.console-check.js
 /.recon/
+/.playwright-cli/
+/docs/superpowers/
 /deepai.org.har
 
 # 编辑器 / 系统
