@@ -34,6 +34,7 @@ type googleTask struct {
 	view          googleTaskView
 	cancel        context.CancelFunc
 	cancelAccount context.CancelFunc
+	idleTimeout   time.Duration
 }
 
 type googleTasks struct {
@@ -68,7 +69,17 @@ func (s *Server) handleGoogleAccounts(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	switch r.Method {
 	case http.MethodGet:
-		writeJSON(w, 200, map[string]any{"accounts": s.Store.GoogleAccounts(), "encrypted": s.Store.MasterKeySet()})
+		accounts := s.Store.GoogleAccounts()
+		for i := range accounts {
+			if accounts[i].Status != "authorized" {
+				continue
+			}
+			if a := s.Store.AccountCopy(accounts[i].AccountID); a != nil {
+				// Authorization logs are historical; the list shows the latest quota.
+				accounts[i].Message = googleEnrollmentMessage(a)
+			}
+		}
+		writeJSON(w, 200, map[string]any{"accounts": accounts, "encrypted": s.Store.MasterKeySet()})
 	case http.MethodPost:
 		s.Google.mu.Lock()
 		defer s.Google.mu.Unlock()
@@ -116,6 +127,11 @@ func (s *Server) handleGoogleStart(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "授权数量必须为 1–1000", "invalid_request_error")
 		return
 	}
+	idleTimeout, err := googleLoginIdleTimeout()
+	if err != nil {
+		writeErr(w, 400, err.Error(), "invalid_request_error")
+		return
+	}
 	s.Google.mu.Lock()
 	defer s.Google.mu.Unlock()
 	if s.Google.activeLocked() {
@@ -145,7 +161,7 @@ func (s *Server) handleGoogleStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	task := &googleTask{view: googleTaskView{ID: deepai.RandomHex(16), Status: "running", Total: len(accounts), Logs: []string{}}, cancel: cancel}
+	task := &googleTask{view: googleTaskView{ID: deepai.RandomHex(16), Status: "running", Total: len(accounts), Logs: []string{}}, cancel: cancel, idleTimeout: idleTimeout}
 	s.Google.current = task
 	go s.runGoogleTask(ctx, task, accounts)
 	w.Header().Set("Cache-Control", "no-store")
@@ -227,12 +243,8 @@ func (s *Server) runGoogleTask(ctx context.Context, task *googleTask, accounts [
 			}
 			task.mu.Unlock()
 		}
-		report("starting", "正在启动 Google 登录")
-		login := s.googleLogin
-		if login == nil {
-			login = s.loginGoogle
-		}
-		creds, err := login(accountCtx, googleauth.Credential{Email: account.Email, Password: account.Password}, report)
+		report("starting", fmt.Sprintf("正在启动 Google 登录（连续 %g 秒无新进展将自动跳过）", task.idleTimeout.Seconds()))
+		creds, err := s.runGoogleLogin(accountCtx, task.idleTimeout, googleauth.Credential{Email: account.Email, Password: account.Password}, report)
 		var accountID string
 		if err == nil {
 			report("validating", "已完成登录，正在检查 DeepAI Code 资格")
@@ -240,19 +252,18 @@ func (s *Server) runGoogleTask(ctx context.Context, task *googleTask, accounts [
 		}
 		phase, message, status := "done", "授权完成，已加入 DeepAI 账号池", "authorized"
 		if err == nil {
-			if a := s.Store.AccountCopy(accountID); a != nil && a.Theos != nil && a.Theos.Balance != "" {
-				message += "；当前余额 " + a.Theos.Balance + " Theos"
-				if !positiveQuota(a.Theos) {
-					message += "（当前无可用额度）"
-				}
-			}
+			message = googleEnrollmentMessage(s.Store.AccountCopy(accountID))
 		}
 		task.mu.Lock()
 		task.cancelAccount = nil
+		var idleTimeoutError *googleLoginIdleTimeoutError
 		if err == nil {
 			task.view.Succeeded++
 		} else if ctx.Err() != nil {
 			phase, message, status = "cancelled", "任务已停止，账号可再次使用", "available"
+		} else if errors.As(err, &idleTimeoutError) {
+			phase, message, status = "skipped", idleTimeoutError.Error(), "failed"
+			task.view.Skipped++
 		} else if errors.Is(err, context.Canceled) {
 			phase, message, status = "skipped", "已跳过，可勾选重试失败账号重新授权", "failed"
 			task.view.Skipped++
@@ -280,6 +291,24 @@ func (s *Server) runGoogleTask(ctx context.Context, task *googleTask, accounts [
 		task.view.Status = "cancelled"
 	}
 	task.mu.Unlock()
+}
+
+func googleEnrollmentMessage(a *deepai.Account) string {
+	message := "授权完成，已加入 DeepAI 账号池"
+	if a == nil {
+		return message
+	}
+	if a.Status == "error" {
+		// A failed request leaves the last successful quota in the cache.
+		return message + "；账号状态异常，请刷新额度确认"
+	}
+	if a.Theos != nil && a.Theos.Balance != "" {
+		message += "；当前余额 " + a.Theos.Balance + " Theos"
+		if !positiveQuota(a.Theos) {
+			message += "（当前无可用额度）"
+		}
+	}
+	return message
 }
 
 func googleLoginError(err error) string {
@@ -344,5 +373,8 @@ func (s *Server) enrollGoogle(ctx context.Context, email string, creds *deepai.C
 	}
 	s.Store.UpsertAccount(acct)
 	s.Store.SetAccountAllowance(acct.ID, al, nil)
+	if !positiveQuota(al) {
+		s.scheduleQuotaReprobe(acct.ID)
+	}
 	return acct.ID, nil
 }

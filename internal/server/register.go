@@ -471,9 +471,8 @@ func (s *Server) enrollRegistration(reg deepai.Registration, al *deepai.Allowanc
 		return "", isNew, err
 	}
 
-	// 刚注册完的账号，上游往往还没把当日额度发下来：此时 /theos 会返回
-	// balance=0，但几分钟后同一个 Key 再查就是 200。若不复探，这个 0 会被
-	// 当成事实缓存下来，调度侧就会长期跳过该账号。
+	// 入池时的 0 额度可能稍后发生变化，安排有限次复探以更新缓存。
+	// 是否发放额度由上游决定；复探不修改设备标识或推算余额。
 	if al == nil || !positiveQuota(al) {
 		s.scheduleQuotaReprobe(acct.ID)
 	}
@@ -494,8 +493,8 @@ func positiveQuota(al *deepai.Allowance) bool {
 
 // quotaReprobeDelays 是入池后 0 额度的复探退避序列。
 //
-// 实测新账号在注册后 3~5 分钟内会拿到当日额度，所以从 3 分钟起探，
-// 最多 3 次；拿到正额度即停止。
+// 各次探测之间依次等待 3、6、12 分钟（约在入池后第 3、9、21 分钟）。
+// 最多 3 次；拿到正额度即停止，不保证上游一定会发放额度。
 var quotaReprobeDelays = []time.Duration{3 * time.Minute, 6 * time.Minute, 12 * time.Minute}
 
 // scheduleQuotaReprobe 异步复探某个账号的配额（仅当它仍是 0 时）。
@@ -512,7 +511,7 @@ func (s *Server) scheduleQuotaReprobe(id string) {
 	go func() {
 		for _, d := range delays {
 			time.Sleep(d)
-			a := s.Store.Account(id)
+			a := s.Store.AccountCopy(id)
 			if a == nil {
 				return // 已被删除
 			}
