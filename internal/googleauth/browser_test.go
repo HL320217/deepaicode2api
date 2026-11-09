@@ -71,6 +71,7 @@ func TestBrowserRunsSuccessiveGooglePages(t *testing.T) {
 	}
 	var done atomic.Bool
 	fixture := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Logf("successive-page fixture request: %s", r.URL.Path)
 		if r.URL.Path == "/done" {
 			done.Store(true)
 			w.WriteHeader(204)
@@ -80,12 +81,17 @@ func TestBrowserRunsSuccessiveGooglePages(t *testing.T) {
 		_, _ = w.Write([]byte(`<input id="identifierId" type="email"><button id="identifierNext" onclick="showPassword()">Next</button><script>function showPassword(){document.body.innerHTML='<input name="Passwd" type="password"><button id="passwordNext" onclick="fetch(\'/done\')">Next</button>';}</script>`))
 	}))
 	defer fixture.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 9*time.Second)
+	// Include a cold Chromium startup on shared CI runners as well as both
+	// login steps; the individual production steps retain their own deadlines.
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	b := &Browser{Executable: exe, googleOriginForTest: fixture.URL, Headless: true}
-	err = b.Run(ctx, fixture.URL, Credential{Email: "a@school.edu", Password: "fixture-password"}, done.Load, func(string, string) {})
+	var phases []string
+	err = b.Run(ctx, fixture.URL, Credential{Email: "a@school.edu", Password: "fixture-password"}, done.Load, func(phase, message string) {
+		phases = append(phases, phase+": "+message)
+	})
 	if err != nil || !done.Load() {
-		t.Fatalf("successive steps failed: %v", err)
+		t.Fatalf("successive steps failed: %v; progress: %v", err, phases)
 	}
 }
 
