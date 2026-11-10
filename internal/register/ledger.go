@@ -72,6 +72,11 @@ func redactRecord(rec *Record) *Record {
 	cp.Password = ""
 	cp.SessionKey = ""
 	cp.CSRFToken = ""
+	// Dynamic proxy credentials live only in the gateway's configuration/state.
+	// Server-side retries obtain the current managed proxy from NetworkSession.
+	if cp.ManagedProxy {
+		cp.Proxy = ""
+	}
 	return cp
 }
 

@@ -65,6 +65,9 @@ func (s *Store) GoogleAccounts() []GoogleAccountView {
 	defer s.mu.RUnlock()
 	out := make([]GoogleAccountView, 0, len(s.st.GoogleAccounts))
 	for _, a := range s.st.GoogleAccounts {
+		if a.Password == "" {
+			continue
+		}
 		out = append(out, GoogleAccountView{a.Email, a.Status, a.Phase, a.Message, a.AccountID, a.UpdatedAt})
 	}
 	return out
@@ -74,14 +77,22 @@ func (s *Store) GoogleAccounts() []GoogleAccountView {
 func (s *Store) MergeGoogleAccounts(accounts []GoogleAccount) (added, updated int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.mergeGoogleAccountsLocked(accounts)
+}
+
+func (s *Store) mergeGoogleAccountsLocked(accounts []GoogleAccount) (added, updated int) {
 	for _, input := range accounts {
 		input.Email = strings.ToLower(strings.TrimSpace(input.Email))
 		found := false
 		for _, old := range s.st.GoogleAccounts {
 			if old.Email == input.Email {
+				if old.Password == "" {
+					added++
+				} else {
+					updated++
+				}
 				old.Password = input.Password
 				old.UpdatedAt = time.Now().Unix()
-				updated++
 				found = true
 				break
 			}
@@ -98,11 +109,21 @@ func (s *Store) MergeGoogleAccounts(accounts []GoogleAccount) (added, updated in
 
 // ReserveGoogleAccounts atomically claims a bounded batch. Failed accounts are
 // retried only when the operator explicitly enables retry; successful ones skip.
-func (s *Store) ReserveGoogleAccounts(count int, retry bool) []GoogleAccount {
+func (s *Store) ReserveGoogleAccounts(count int, retry bool, emails ...string) []GoogleAccount {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	selected := map[string]bool{}
+	for _, email := range emails {
+		selected[strings.ToLower(strings.TrimSpace(email))] = true
+	}
 	var out []GoogleAccount
 	for _, a := range s.st.GoogleAccounts {
+		if a.Password == "" {
+			continue
+		}
+		if len(selected) > 0 && !selected[a.Email] {
+			continue
+		}
 		if len(out) >= count {
 			break
 		}
@@ -116,6 +137,83 @@ func (s *Store) ReserveGoogleAccounts(count int, retry bool) []GoogleAccount {
 		out = append(out, *a)
 	}
 	return out
+}
+
+// ImportGoogleAccounts previews or persists credentials atomically, preserving
+// authorization history and restoring the old pool if persistence fails.
+func (s *Store) ImportGoogleAccounts(accounts []GoogleAccount, preview bool) (added, updated, count int, err error) {
+	s.saveMu.Lock()
+	defer s.saveMu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	before := s.cloneGoogleAccountsLocked()
+	added, updated = s.mergeGoogleAccountsLocked(accounts)
+	for _, a := range s.st.GoogleAccounts {
+		if a.Password != "" {
+			count++
+		}
+	}
+	if preview {
+		s.st.GoogleAccounts = before
+		return
+	}
+	if err = s.saveLocked(); err != nil {
+		s.st.GoogleAccounts = before
+	}
+	return
+}
+
+func (s *Store) cloneGoogleAccountsLocked() []*GoogleAccount {
+	out := make([]*GoogleAccount, len(s.st.GoogleAccounts))
+	for i, a := range s.st.GoogleAccounts {
+		copy := *a
+		out[i] = &copy
+	}
+	return out
+}
+
+func (s *Store) UpdateGoogleCredentials(email, password string) (bool, error) {
+	s.saveMu.Lock()
+	defer s.saveMu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, a := range s.st.GoogleAccounts {
+		if a.Password == "" || !strings.EqualFold(a.Email, strings.TrimSpace(email)) {
+			continue
+		}
+		before := *a
+		a.Password, a.UpdatedAt = password, time.Now().Unix()
+		if err := s.saveLocked(); err != nil {
+			*a = before
+			return true, err
+		}
+		return true, nil
+	}
+	return false, nil
+}
+
+// DeleteGoogleCredentials removes only credentials; enrolled accounts stay intact.
+func (s *Store) DeleteGoogleCredentials(emails []string) (map[string]bool, error) {
+	s.saveMu.Lock()
+	defer s.saveMu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	before := s.cloneGoogleAccountsLocked()
+	removed := map[string]bool{}
+	for _, email := range emails {
+		removed[strings.ToLower(strings.TrimSpace(email))] = false
+	}
+	for _, a := range s.st.GoogleAccounts {
+		if _, selected := removed[a.Email]; selected && a.Password != "" {
+			removed[a.Email] = true
+			a.Password = ""
+		}
+	}
+	if err := s.saveLocked(); err != nil {
+		s.st.GoogleAccounts = before
+		return nil, err
+	}
+	return removed, nil
 }
 
 func (s *Store) SetGoogleAccountResult(email, status, phase, message, accountID string) {

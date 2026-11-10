@@ -76,6 +76,7 @@ type Record struct {
 
 	MailboxProvider string `json:"mailbox_provider,omitempty"`
 	Proxy           string `json:"proxy,omitempty"`
+	ManagedProxy    bool   `json:"managed_proxy,omitempty"`
 	ProxyLabel      string `json:"proxy_label,omitempty"`
 	Fingerprint     string `json:"fingerprint,omitempty"`
 	// MachineID 是该账号专用的机器指纹（原始 UUID）。

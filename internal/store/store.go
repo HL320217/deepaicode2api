@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"deepaicode2api/internal/deepai"
+	"deepaicode2api/internal/egress"
 )
 
 // APIKey 是网关对外签发的调用密钥。
@@ -69,6 +70,8 @@ type Stats struct {
 
 // State 是全部持久化状态。
 type State struct {
+	EgressConfig   egress.Config     `json:"egress_config"`
+	EgressState    egress.State      `json:"egress_state"`
 	Accounts       []*deepai.Account `json:"accounts"`
 	GoogleAccounts []*GoogleAccount  `json:"google_accounts,omitempty"`
 	Keys           []*APIKey         `json:"keys"`
@@ -177,12 +180,17 @@ func (s *Store) Path() string { return s.path }
 func (s *Store) Save() error {
 	s.saveMu.Lock()
 	defer s.saveMu.Unlock()
-	s.mu.RLock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.saveLocked()
+}
+
+// saveLocked writes the current state; callers hold saveMu followed by mu.
+func (s *Store) saveLocked() error {
 	plain, err := json.MarshalIndent(s.st, "", "  ")
 	key := s.masterKey
 	last := s.lastSaved
 	enc := s.encrypted
-	s.mu.RUnlock()
 	if err != nil {
 		return err
 	}
@@ -211,12 +219,10 @@ func (s *Store) Save() error {
 		return err
 	}
 
-	s.mu.Lock()
 	s.lastSaved = append(s.lastSaved[:0], plain...)
 	if len(key) > 0 {
 		s.encrypted = true
 	}
-	s.mu.Unlock()
 	return nil
 }
 
@@ -288,7 +294,12 @@ func (s *Store) AccountCopy(id string) *deepai.Account {
 func (s *Store) UpsertAccount(a *deepai.Account) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for i, ex := range s.st.Accounts {
+	return upsertAccountLocked(s.st, a)
+}
+
+// upsertAccountLocked requires the caller to hold the store write lock.
+func upsertAccountLocked(st *State, a *deepai.Account) bool {
+	for i, ex := range st.Accounts {
 		if ex.KeyID() != a.KeyID() && !sameEmail(ex.Email, a.Email) {
 			continue
 		}
@@ -335,10 +346,10 @@ func (s *Store) UpsertAccount(a *deepai.Account) bool {
 		if a.RegisteredAt == 0 {
 			a.RegisteredAt = ex.RegisteredAt
 		}
-		s.st.Accounts[i] = a
+		st.Accounts[i] = a
 		return false
 	}
-	s.st.Accounts = append(s.st.Accounts, a)
+	st.Accounts = append(st.Accounts, a)
 	return true
 }
 
@@ -599,7 +610,10 @@ func (s *Store) Keys() []*APIKey {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	out := make([]*APIKey, len(s.st.Keys))
-	copy(out, s.st.Keys)
+	for i, key := range s.st.Keys {
+		cp := *key
+		out[i] = &cp
+	}
 	return out
 }
 

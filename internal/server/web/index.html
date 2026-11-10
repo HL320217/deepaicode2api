@@ -132,6 +132,7 @@ body.signed-out .login-screen{display:flex}
 .google-pool{margin-bottom:24px}.google-pool .register-layout{margin-top:18px}.google-pool h3{font-size:14px;margin:0 0 12px}.google-pool .card-subtitle{max-width:72ch}.google-pool .google-controls{display:flex;flex-wrap:wrap;gap:10px;margin:16px 0}.google-pool .google-controls .btn{min-height:44px}.google-pool .google-status{min-height:48px;margin:16px 0;overflow-wrap:anywhere}.google-pool .google-progress{width:100%;height:8px;accent-color:var(--accent)}.google-pool .google-logs{max-height:220px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px}.google-pool .google-message{max-width:320px;overflow-wrap:anywhere}.google-pool .google-import{border-top:1px solid var(--line);padding-top:14px;margin-top:14px}.google-pool .google-import .row{margin-top:12px}.google-pool input[type=file]{max-width:100%}.google-pool .google-search{max-width:220px;width:100%}.google-pool .google-controls button:focus-visible{outline:2px solid var(--accent);outline-offset:3px}.google-pool button{transition:background-color .15s ease,border-color .15s ease}.google-pool .google-summary{font-size:13px;color:var(--dim);margin-top:8px}
 .google-pool .register-layout>*{min-width:0}.google-pool .google-status{white-space:pre-line}.google-pool .table-wrap{max-width:100%}
 @media(prefers-reduced-motion:reduce){.google-pool button{transition:none}}
+/* resource-styles */
 </style>
 </head>
 <body class="signed-out">
@@ -212,9 +213,10 @@ body.signed-out .login-screen{display:flex}
         <select id="acctGroupFilter" aria-label="账号分组"><option value="">全部分组</option></select>
         <button class="btn" id="acctFilterReset">清除筛选</button>
       </div>
-      <table><thead><tr>
-        <th>账号</th><th>分组</th><th>来源</th><th>Key</th><th>套餐 / 验证</th><th>Theos</th><th>状态</th><th>失败</th><th>最近使用</th><th>操作</th>
-      </tr></thead><tbody id="accounts"></tbody></table>
+      <div class="table-wrap"><table class="resource-table"><thead><tr>
+        <th><input type="checkbox" id="acctSelectAll" aria-label="选择本页账号"></th><th>账号</th><th class="secondary">分组</th><th class="balance-column">余额</th><th class="state-column">状态</th><th class="secondary">最近使用</th><th>操作</th>
+      </tr></thead><tbody id="accounts"></tbody></table></div>
+      <div id="acctBulk" class="bulk-bar" hidden><strong id="acctSelected"></strong><button class="btn" id="acctBulkQuota">刷新额度</button><button class="btn" id="acctBulkGroup">修改分组</button><button class="btn" id="acctBulkEnable">启用</button><button class="btn" id="acctBulkDisable">停用</button><button class="btn danger" id="acctBulkRemove">删除</button><button class="btn" id="acctClearSelection">取消选择</button></div>
       <div class="row" id="acctPager" style="margin-top:12px">
         <span id="acctInfo" class="muted"></span>
         <span class="sp"></span>
@@ -251,8 +253,9 @@ body.signed-out .login-screen{display:flex}
       <div class="google-summary" id="googleSummary">尚未导入 Google 账号</div>
       <div class="register-layout">
         <div>
-          <label for="googleSearch">搜索 Google 邮箱</label><input class="google-search" id="googleSearch" type="search" placeholder="邮箱地址">
-          <div class="table-wrap"><table><thead><tr><th>Google 邮箱</th><th>状态</th><th>当前步骤 / 结果</th></tr></thead><tbody id="googleAccounts"></tbody></table></div>
+          <div class="resource-toolbar"><input class="google-search" id="googleSearch" type="search" placeholder="搜索 Google 邮箱" aria-label="搜索 Google 邮箱"><select id="googleFilter" aria-label="Google 授权状态"><option value="">全部状态</option><option value="available">可用</option><option value="authorized">已授权</option><option value="failed">失败</option><option value="running">登录中</option><option value="action_required">需要处理</option><option value="queued">等待中</option></select><button class="btn" id="googleSelectPage">选择本页</button><button class="btn primary" id="googleAdd">添加账号</button></div>
+          <div class="table-wrap"><table class="resource-table"><thead><tr><th><span class="muted">选择</span></th><th>Google 邮箱</th><th class="state-column">状态</th><th class="secondary">当前步骤 / 结果</th><th>操作</th></tr></thead><tbody id="googleAccounts"></tbody></table></div>
+          <div id="googleBulk" class="bulk-bar" hidden><strong id="googleSelected"></strong><button class="btn" id="googleBulkRetry">授权所选账号</button><button class="btn danger" id="googleBulkRemove">删除资料</button><button class="btn" id="googleClearSelection">取消选择</button></div>
           <div class="mail-pager"><span id="googlePageInfo" class="muted">共 0 条</span><div><button class="btn" id="googlePrev" type="button">上一页</button> <button class="btn" id="googleNext" type="button">下一页</button></div></div>
           <details class="google-import"><summary>导入 Google 账密文件</summary><label for="googleFile">UTF-8 文本文件（最多 1000 个账号）</label><div class="row"><input id="googleFile" type="file" accept=".txt,text/plain"><button class="btn" id="googleImport" type="button">导入并合并号池</button></div><p class="hint">每行：邮箱----Google密码，也支持制表符或 | 分隔。重复邮箱更新密码并保留授权结果，已授权账号自动跳过。</p><div id="googleImportStatus" class="muted" role="status" aria-live="polite"></div></details>
         </div>
@@ -273,7 +276,9 @@ body.signed-out .login-screen{display:flex}
       <div class="card mail-card">
         <div class="card-heading"><div><h2>邮箱资产</h2><p class="card-subtitle">已注册和待确认邮箱会自动跳过</p></div><input id="mailSearch" type="search" placeholder="搜索邮箱" aria-label="搜索邮箱"></div>
         <div class="mail-tabs" role="group" aria-label="邮箱状态筛选"><button class="active" data-mail-filter="all">全部</button><button data-mail-filter="available">可用</button><button data-mail-filter="registered">已注册</button><button data-mail-filter="pending">待确认</button></div>
-        <div class="table-wrap"><table><thead><tr><th>邮箱</th><th>状态</th></tr></thead><tbody id="graphAccounts"></tbody></table></div>
+        <div class="resource-toolbar"><button class="btn" id="mailSelectPage">选择本页</button><button class="btn primary" id="mailAdd">添加邮箱</button></div>
+        <div class="table-wrap"><table class="resource-table"><thead><tr><th>选择</th><th>邮箱</th><th class="state-column">状态</th><th>操作</th></tr></thead><tbody id="graphAccounts"></tbody></table></div>
+        <div id="mailBulk" class="bulk-bar" hidden><strong id="mailSelected"></strong><button class="btn danger" id="mailBulkRemove">删除资料</button><button class="btn" id="mailClearSelection">取消选择</button></div>
         <div class="mail-pager"><span id="mailPageInfo" class="muted">暂无邮箱</span><div><button class="btn" id="mailPrev">上一页</button> <button class="btn" id="mailNext">下一页</button></div></div>
         <details id="importPanel" class="import-panel"><summary>导入 Hotmail / Outlook 邮箱</summary><div class="row"><input type="file" id="graphMailFile" accept=".txt,text/plain"><button class="btn" id="graphMailImport">导入并合并邮箱列表</button></div><p id="graphMailStatus" class="muted">尚未导入</p><div class="hint">每行：邮箱----密码----client_id----refresh_token。重复邮箱更新为本次导入的凭据，其他邮箱与已记录状态保留。</div></details>
       </div>
@@ -298,10 +303,12 @@ body.signed-out .login-screen{display:flex}
         <input id="keyGroup" placeholder="分组（默认 default）" style="width:160px">
         <button class="btn primary" id="addKey">创建密钥</button>
       </div>
-      <table><thead><tr><th>密钥</th><th>备注</th><th>分组</th><th>状态</th><th>请求数</th><th>创建时间</th><th>最近使用</th><th>操作</th></tr></thead>
-      <tbody id="keys"></tbody></table>
-      <div class="hint">密钥已脱敏。完整密钥只在创建时返回一次，请立即保存。<br>
-        未签发任何密钥时，<code>/v1/*</code> 允许无密钥调用。</div>
+      <div class="resource-toolbar"><input id="keySearch" type="search" placeholder="搜索备注、分组或密钥片段" aria-label="搜索密钥"><select id="keyStatusFilter" aria-label="密钥状态"><option value="">全部状态</option><option value="true">启用</option><option value="false">停用</option></select></div>
+      <div class="table-wrap"><table class="resource-table"><thead><tr><th>备注 / 密钥</th><th class="secondary">授权分组</th><th class="state-column">状态</th><th class="secondary">请求数</th><th class="secondary">最近使用</th><th>操作</th></tr></thead>
+      <tbody id="keys"></tbody></table></div>
+      <div class="mail-pager"><span id="keyPageInfo"></span><div><button class="btn" id="keyPrev">上一页</button> <button class="btn" id="keyNext">下一页</button></div></div>
+      <div class="hint">列表默认遮挡密钥，可在详情中查看和复制。<br>
+        未签发任何密钥时，仅本机回环请求允许无密钥调用；其他来源会被拒绝。</div>
     </div>
   </section>
 
@@ -322,7 +329,7 @@ body.signed-out .login-screen{display:flex}
 
   <section id="tab-settings">
     <div class="card">
-      <h2>运行设置</h2>
+      <h2>运行设置</h2><p class="settings-draft" id="settingsDraft" role="status" hidden>有未保存的修改。刷新列表不会覆盖当前草稿。</p>
       <div class="grid2">
         <div><label>请求超时（秒）</label><input id="sTimeout" type="number" min="1"></div>
         <div><label>最大重试次数</label><input id="sRetries" type="number" min="1"></div>
@@ -339,11 +346,31 @@ body.signed-out .login-screen{display:flex}
         <button class="btn danger" id="clearStats">重置统计</button>
       </div>
     </div>
+    <div class="card" id="egressPanel" aria-labelledby="egressTitle">
+      <div class="card-heading"><div><h2 id="egressTitle">动态代理</h2><p class="card-subtitle">注册和额度查询共用出口；账号的 Machine 保持不变。</p></div><span id="egressBadge" class="status-chip">未加载</span></div>
+      <div class="egress-status" role="status" aria-live="polite"><div><span class="muted">当前出口</span><strong id="egressIP">—</strong></div><div><span class="muted">本出口已记录的发放账号</span><strong id="egressCount">—</strong></div><div><span class="muted">上次切换</span><strong id="egressRotated">—</strong></div></div>
+      <p id="egressMessage" class="field-error" role="alert"></p>
+      <div class="egress-switches"><label><input type="checkbox" id="egressEnabled">启用统一代理</label><label><input type="checkbox" id="egressAuto">达到阈值后自动切换</label></div>
+      <div class="grid2">
+        <div><label for="egressProxy">代理地址</label><input id="egressProxy" type="password" autocomplete="new-password" placeholder="http://用户名:密码@主机:端口"><p id="egressProxyHint" class="hint">支持 HTTP、HTTPS、SOCKS5。保存后不回显凭据。</p></div>
+        <div><label for="egressRefresh">刷新 IP 链接（GET）</label><input id="egressRefresh" type="password" autocomplete="new-password" placeholder="https://供应商/刷新链接"><p id="egressRefreshHint" class="hint">每次切换只请求一次，随后确认新出口。</p></div>
+        <div><label for="egressLimit">每出口发放阈值</label><input id="egressLimit" type="number" value="5" min="1" max="1000"><p class="hint">经验值，可按供应商及上游实际规则调整。</p></div>
+        <div><label for="egressWait">确认新出口的超时（秒）</label><input id="egressWait" type="number" value="30" min="1" max="120"></div>
+      </div>
+      <details><summary>出口检测设置</summary><label for="egressIPURL">公开 IP 检测地址</label><input id="egressIPURL" type="url" value="https://api.ipify.org?format=json"><p class="hint">须返回纯 IP 或包含 ip 字段的 JSON。检测和上游请求均走已配置的代理；代理供应商分流时，检测结果不保证等于上游所见出口。</p></details>
+      <p id="egressDraft" class="settings-draft" hidden>动态代理有未保存的修改，操作前请先保存。</p>
+      <div class="row egress-actions"><button class="btn primary" id="egressSave">保存代理配置</button><button class="btn" id="egressDetect">检测出口与连接</button><button class="btn" id="egressRotate">立即刷新 IP</button><button class="btn" id="egressPause">暂停</button><button class="btn" id="egressResume">恢复</button></div>
+      <p class="hint">已有正额度、重复查询和失败请求不计为新增发放。刷新失败会暂停；请检查线路后恢复。启用时覆盖注册任务的代理池和额度查询的账号代理，注册按账号串行执行。</p>
+    </div>
   </section>
 </main>
 
 <div class="toast" id="toast"></div>
 
+<dialog id="resourceDialog" class="resource-dialog drawer" aria-labelledby="resourceTitle">
+  <form id="resourceForm"><div class="dialog-head"><h2 id="resourceTitle"></h2><button id="resourceClose" type="button" class="btn" aria-label="关闭详情">关闭</button></div><div class="dialog-body"><div id="resourceDetails"></div><div id="resourceFields"></div><p id="resourceError" class="field-error" role="alert"></p></div><div class="dialog-actions"><button id="resourceSave" type="submit" class="btn primary">保存修改</button></div></form>
+</dialog>
+<dialog id="confirmDialog" class="resource-dialog" aria-labelledby="confirmTitle" aria-describedby="confirmMessage"><div class="dialog-head"><h2 id="confirmTitle"></h2></div><div class="dialog-body"><p id="confirmMessage" style="white-space:pre-line"></p></div><div class="dialog-actions"><button class="btn" id="confirmCancel" type="button">取消</button><button class="btn danger" id="confirmAccept" type="button">确认删除</button></div></dialog>
 <script>
 (function(){
   "use strict";
@@ -364,9 +391,10 @@ body.signed-out .login-screen{display:flex}
     clearTimeout(toast._t);
     toast._t = setTimeout(function(){ t.className = "toast"; }, 4600);
   }
-  var adminPassword = "", signedIn = false;
+  var adminPassword = "", signedIn = false, sessionVersion = 0;
   function pw(){ return adminPassword; }
   function showLogin(message){
+    sessionVersion++;
     signedIn = false; adminPassword = ""; state.data = null;
     document.body.classList.add("signed-out");
     $("#loginPassword").value = "";
@@ -376,6 +404,7 @@ body.signed-out .login-screen{display:flex}
 
   function api(path, opts){
     opts = opts || {};
+    var requestSession=sessionVersion;
     var h = { "Content-Type":"application/json" };
     if (pw()) h["X-Admin-Password"] = pw();
     return fetch(path, {
@@ -384,6 +413,7 @@ body.signed-out .login-screen{display:flex}
       body: opts.body ? JSON.stringify(opts.body) : undefined
     }).then(function(r){
       return r.text().then(function(txt){
+        if(requestSession!==sessionVersion)throw new Error('登录会话已切换，请刷新后重试。');
         var j = null;
         try { j = JSON.parse(txt); } catch(e){}
         if (!r.ok) {
@@ -523,80 +553,8 @@ body.signed-out .login-screen{display:flex}
     });
   }
 
-  function renderAccounts(d){
-    var tb = $("#accounts");
-    tb.textContent = "";
-    var accounts = d.accounts || [], groupSelect = $("#acctGroupFilter"), selectedGroup = groupSelect.value;
-    var groups = Array.from(new Set(accounts.map(function(a){return a.group || "default";}))).sort();
-    groupSelect.textContent = ""; groupSelect.appendChild(new Option("全部分组", ""));
-    groups.forEach(function(g){groupSelect.appendChild(new Option(g, g));});
-    if (groups.includes(selectedGroup)) groupSelect.value = selectedGroup;
-    var query = $("#acctSearch").value.trim().toLowerCase(), status = $("#acctStatusFilter").value, balance = $("#acctBalanceFilter").value, verified = $("#acctVerifyFilter").value, group = groupSelect.value;
-    var all = accounts.filter(function(a){
-      var q = [a.email, a.name, a.username].some(function(x){return String(x || "").toLowerCase().includes(query);});
-      var st = !status || (status === "disabled" ? !a.enabled : a.enabled && (a.status || "unknown") === status);
-      var raw = a.theos && a.theos.balance, number = raw === null || raw === undefined || String(raw).trim() === "" ? NaN : Number(raw);
-      var bal = !balance || (balance === "unknown" ? !Number.isFinite(number) : balance === "positive" ? Number.isFinite(number) && number > 0 : Number.isFinite(number) && number <= 0);
-      return q && st && bal && (!verified || (verified === "verified" ? !!a.email_verified : !a.email_verified)) && (!group || (a.group || "default") === group);
-    });
-    if (!all.length) {
-      tb.appendChild(emptyRow(10, accounts.length ? "没有符合筛选条件的账号" : "暂无账号，点击「导入本机桌面端」或「浏览器登录」"));
-      updateAcctPager(0, 0);
-      return;
-    }
-    // 分页：超过一页时只渲染当前页，排序仍按后端下发的顺序。
-    var pages = Math.max(1, Math.ceil(all.length / acctPageSize));
-    if (acctPage > pages - 1) acctPage = pages - 1;
-    if (acctPage < 0) acctPage = 0;
-    var start = acctPage * acctPageSize;
-    var accts = all.slice(start, start + acctPageSize);
-    accts.forEach(function(a){
-      var statusCell = cell("");
-      if (a.enabled) {
-        var okStatus = a.status === "ok";
-        var label = a.status || "error";
-        if (a.status === "unknown") label = "未探测";
-        var statusCls = "err";
-        if (a.status === "unknown") statusCls = "warn";
-        else if (okStatus) statusCls = "ok";
-        statusCell.appendChild(pill(label, statusCls));
-      } else {
-        statusCell.appendChild(pill("已停用"));
-      }
+  var renderAccounts; // Implemented by the embedded resource controller.
 
-      var ops = cell("");
-      ops.appendChild(btn("配额", "", function(){ checkin(a.id); }));
-      ops.appendChild(document.createTextNode(" "));
-      ops.appendChild(btn(a.enabled ? "停用" : "启用", "", function(){ accountOp("toggle", {id:a.id}); }));
-      if (a.failures > 0) {
-        ops.appendChild(document.createTextNode(" "));
-        ops.appendChild(btn("清错", "", function(){ accountOp("clear-errors", {id:a.id}); }));
-      }
-      ops.appendChild(document.createTextNode(" "));
-      ops.appendChild(btn("删除", "danger", function(){
-        if (confirm("确定删除账号 " + a.name + "？")) accountOp("remove", {id:a.id});
-      }));
-
-      var acctCell = cell("");
-      acctCell.appendChild(mk("div", null, a.email || a.name));
-      acctCell.appendChild(mk("div", "muted mono", a.username || ""));
-      if (a.proxy) acctCell.appendChild(mk("div", "muted mono", a.proxy + (a.fingerprint ? " · " + a.fingerprint : "")));
-      var planText = a.is_pro ? "Pro" : (a.plan || "Free");
-      if (a.email_verified) planText += " · 已验证";
-      else planText += " · 未验证";
-      var r = row([
-        acctCell, cell(a.group || "default", "mono"), cell(a.source, "muted"),
-        cell(a.key, "mono"), cell(planText, a.is_pro ? "" : "muted"), cell(theosText(a.theos), "mono"),
-        statusCell, cell(a.failures, "mono"), cell(fmtTime(a.last_used), "muted"), ops
-      ]);
-      if (a.last_err) r.title = a.last_err;
-      if (a.theos && a.theos.refresh_at) r.title = (a.last_err ? a.last_err + "\n" : "") + "配额刷新：" + a.theos.refresh_at;
-      tb.appendChild(r);
-    });
-    updateAcctPager(all.length, start + accts.length);
-  }
-
-  // 分页控件状态（总数为 0 时也给出明确文案）。
   function updateAcctPager(total, shownTo){
     var info = $("#acctInfo"), prev = $("#acctPrev"), next = $("#acctNext");
     if (!info || !prev || !next) return;
@@ -614,30 +572,7 @@ body.signed-out .login-screen{display:flex}
     next.disabled = acctPage >= pages - 1;
   }
 
-  function renderKeys(d){
-    var tb = $("#keys");
-    tb.textContent = "";
-    var keys = d.keys || [];
-    if (!keys.length) {
-      tb.appendChild(emptyRow(8, "暂无密钥（未签发时 /v1 允许无密钥调用）"));
-      return;
-    }
-    keys.forEach(function(k){
-      var st = cell("");
-      st.appendChild(pill(k.enabled ? "启用" : "停用", k.enabled ? "ok" : ""));
-      var ops = cell("");
-      ops.appendChild(btn(k.enabled ? "停用" : "启用", "", function(){ keyOp("toggle", k.key); }));
-      ops.appendChild(document.createTextNode(" "));
-      ops.appendChild(btn("删除", "danger", function(){
-        if (confirm("确定删除该密钥？")) keyOp("key", k.key);
-      }));
-      tb.appendChild(row([
-        cell(k.key, "mono"), cell(k.name), cell(k.group || "全部", "mono"), st,
-        cell(k.requests, "mono"), cell(fmtTime(k.created_at), "muted"),
-        cell(fmtTime(k.last_used), "muted"), ops
-      ]));
-    });
-  }
+  var renderKeys; // Implemented by the embedded resource controller.
 
   function renderLogs(logs){
     var tb = $("#logs");
@@ -675,7 +610,9 @@ body.signed-out .login-screen{display:flex}
   }
 
   function refresh(){
+    var version=++accountRefreshVersion;
     return api("/admin/api/state").then(function(d){
+      if(!signedIn || version!==accountRefreshVersion)return;
       state.data = d;
       renderOverview(d);
       renderAccounts(d);
@@ -757,7 +694,7 @@ body.signed-out .login-screen{display:flex}
   };
   $("#addKey").onclick = function(){
     api("/admin/api/keys", {method:"POST", body:{name:$("#keyName").value.trim(), group:$("#keyGroup").value.trim()}}).then(function(r){
-      toast("已创建密钥（仅显示一次）：\n" + r.key, "ok");
+      toast("已创建密钥，可在详情中查看和复制。", "ok");
       $("#keyName").value = "";
       return refresh();
     }).catch(function(e){ toast("创建失败：" + e.message, "err"); });
@@ -798,7 +735,7 @@ body.signed-out .login-screen{display:flex}
   $("#logLimit").onchange = refreshLogs;
 
   // --- 批量注册 ---
-  var regTimer = null, regId = null;
+  var regTimer = null, regId = null, regPollVersion = 0;
 
   // 单号端到端速率与阶段耗时：批量压测的核心指标，放在记录表上方。
   function renderRegStats(recs){
@@ -872,7 +809,9 @@ body.signed-out .login-screen{display:flex}
   function pollRegister(id){
     if (regTimer) { clearTimeout(regTimer); regTimer = null; }
     regId = id;
+    var generation=++regPollVersion;
     api("/admin/api/register?id=" + encodeURIComponent(id)).then(function(job){
+      if(!signedIn||generation!==regPollVersion||regId!==id)return;
       renderRegister(job);
       $("#regStatus").textContent = regStatusText(job);
       if (job.running) {
@@ -883,29 +822,16 @@ body.signed-out .login-screen{display:flex}
         refresh();
       }
     }).catch(function(e){
-      $("#regStatus").textContent = "查询失败：" + e.message;
+      if(signedIn&&generation===regPollVersion)$('#regStatus').textContent = '查询失败：' + e.message;
     });
   }
 
   var mailAccounts = [], mailFilter = "all", mailPage = 0, mailPageSize = 10;
-  function renderMailAccounts(){
-    var query = $("#mailSearch").value.trim().toLowerCase();
-    var filtered = mailAccounts.filter(function(a){ return (mailFilter === "all" || a.status === mailFilter) && (!query || a.email.toLowerCase().includes(query)); });
-    var pages = Math.max(1, Math.ceil(filtered.length / mailPageSize));
-    mailPage = Math.min(mailPage, pages - 1);
-    var slice = filtered.slice(mailPage * mailPageSize, (mailPage + 1) * mailPageSize), rows = $("#graphAccounts"); rows.textContent = "";
-    slice.forEach(function(a){
-      var label = a.status === "registered" ? "已注册" : a.status === "pending" ? "待确认" : "可用";
-      var status = cell(""); status.appendChild(mk("span", "mail-status " + a.status, label));
-      rows.appendChild(row([cell(a.email), status]));
-    });
-    if (!slice.length) rows.appendChild(emptyRow(2, query || mailFilter !== "all" ? "没有匹配的邮箱" : "暂无邮箱，请先导入文件"));
-    $("#mailPageInfo").textContent = filtered.length ? "显示 " + (mailPage * mailPageSize + 1) + "–" + (mailPage * mailPageSize + slice.length) + " 条 · 共 " + filtered.length + " 条" : "共 0 条";
-    $("#mailPrev").disabled = mailPage === 0;
-    $("#mailNext").disabled = mailPage >= pages - 1;
-  }
+  var renderMailAccounts; // Implemented by the embedded resource controller.
+
   function loadGraphMail(){
     return api("/admin/api/register/graph-mail").then(function(r){
+      if(!signedIn)return;
       $("#graphMailStatus").textContent = r.count ? "已导入 " + r.count + " 个邮箱" : "尚未导入";
       mailAccounts = r.accounts || [];
       var counts = {available:0,registered:0,pending:0};
@@ -980,24 +906,8 @@ body.signed-out .login-screen{display:flex}
   // --- Google 号池与自动授权（密码仅从文件发送，不存于浏览器状态） ---
   var googleAccounts = [], googlePage = 0, googleTimer = null, googleLoading = false, googleLoadPromise = null, googleWasActive = false;
   var googleNames = {available:"可用",queued:"等待中",running:"登录中",action_required:"需要处理",authorized:"已授权",failed:"失败"};
-  function renderGoogleAccounts(){
-    var query = $("#googleSearch").value.trim().toLowerCase();
-    var accounts = googleAccounts.filter(function(a){return !query || a.email.toLowerCase().includes(query);});
-    googlePage = Math.max(0, Math.min(googlePage, Math.ceil(accounts.length / 20) - 1));
-    var rows = $("#googleAccounts"); rows.textContent = "";
-    var slice = accounts.slice(googlePage * 20, (googlePage + 1) * 20);
-    slice.forEach(function(a){
-      var status = cell(""); status.appendChild(pill(googleNames[a.status] || a.status, a.status === "authorized" ? "ok" : a.status === "failed" ? "err" : a.status === "action_required" ? "warn" : ""));
-      rows.appendChild(row([cell(a.email),status,cell(a.message || "等待自动登录", "google-message muted")]));
-    });
-    if (!slice.length) rows.appendChild(emptyRow(3,query ? "没有匹配的 Google 账号" : "导入 Google 账密文件后，即可开始自动授权"));
-    $("#googlePageInfo").textContent = "共 " + accounts.length + " 条 · 第 " + (googlePage + 1) + " 页";
-    $("#googlePrev").disabled = googlePage === 0;
-    $("#googleNext").disabled = (googlePage + 1) * 20 >= accounts.length;
-    var counts = {available:0,authorized:0,failed:0,action_required:0};
-    googleAccounts.forEach(function(a){if(counts[a.status] !== undefined) counts[a.status]++;});
-    $("#googleSummary").textContent = "共 " + googleAccounts.length + " 个 · 可用 " + counts.available + " · 已授权 " + counts.authorized + " · 失败 " + counts.failed + (counts.action_required ? " · 需要处理 " + counts.action_required : "");
-  }
+  var renderGoogleAccounts; // Implemented by the embedded resource controller.
+
   function loadGooglePool(force){
     if (!signedIn) return Promise.resolve();
     if (googleLoading) return force === true ? googleLoadPromise.then(function(){return loadGooglePool(true);}) : googleLoadPromise;
@@ -1124,7 +1034,7 @@ body.signed-out .login-screen{display:flex}
   function applyTheme(mode){
     document.documentElement.setAttribute("data-theme", mode);
     var b = $("#theme");
-    if (b) b.textContent = mode === "light" ? "☀️ 浅色" : "🌙 深色";
+    if (b) b.textContent = mode === "light" ? "浅色" : "深色";
   }
   (function initTheme(){
     var mode = null;
@@ -1157,6 +1067,8 @@ body.signed-out .login-screen{display:flex}
     renderAccounts(state.data || {});
   };
 
+  /* resource-controller */
+  /* egress-controller */
   showLogin();
   setInterval(function(){ if (signedIn) loadHealth(); }, 20000);
 })();

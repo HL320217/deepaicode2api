@@ -1,0 +1,637 @@
+/* Resource workspace: compact data, quiet surfaces, one primary action. */
+/* Dense desktop controls retain normal text size; touch layouts expand below. */
+header {
+  height: 52px;
+  min-height: 52px;
+  padding: 0 20px;
+}
+main {
+  padding: 16px 20px 30px;
+}
+.card {
+  padding: 14px;
+  border-radius: 10px;
+  margin-bottom: 14px;
+}
+.page-heading {
+  margin-bottom: 12px;
+  gap: 12px;
+}
+.page-heading h1 {
+  font-size: 22px;
+}
+.page-heading p,
+.card-subtitle,
+.resource-path {
+  display: none;
+}
+.overview-grid > .card {
+  min-height: 0;
+}
+.overview-grid,
+.register-layout,
+.task-layout {
+  gap: 12px;
+}
+.cards,
+.mail-kpis {
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.kpi {
+  min-height: 74px;
+  padding: 12px 14px;
+}
+.kpi .v {
+  font-size: 24px;
+  margin-top: 4px;
+}
+.kpi .resource-sub {
+  display: none;
+}
+button.btn {
+  padding: 6px 10px;
+  min-height: 32px;
+}
+input,
+select,
+textarea {
+  padding: 6px 9px;
+}
+.sidebar {
+  padding-top: 18px;
+}
+.nav-caption {
+  padding-top: 22px;
+}
+.sidebar nav {
+  gap: 3px;
+}
+.account-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.account-controls .resource-counts {
+  gap: 4px;
+  flex-wrap: nowrap;
+}
+.account-controls .resource-counts button {
+  padding: 6px 9px;
+  min-height: 32px;
+}
+.account-controls .account-filters {
+  display: flex;
+  flex: 1 1 580px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  background: none;
+  border: 0;
+  border-radius: 0;
+}
+.account-controls .account-filters input {
+  flex: 1 1 140px;
+  min-width: 120px;
+  max-width: 240px;
+  width: 140px;
+}
+.account-controls .account-filters select {
+  max-width: 120px;
+  width: auto;
+  padding-left: 7px;
+  padding-right: 7px;
+}
+.account-controls #acctFilterReset {
+  order: 9;
+}
+#tab-accounts .card > .hint,
+#tab-keys .card > .hint,
+#tab-logs .card > .hint {
+  display: none;
+}
+#accounts .resource-sub {
+  display: none;
+}
+#accounts button.btn.resource-name {
+  min-height: 28px;
+}
+.mail-tabs {
+  margin: 12px 0 6px;
+  gap: 18px;
+}
+.mail-tabs button {
+  padding-bottom: 8px;
+}
+.mail-pager {
+  margin-top: 12px;
+}
+.resource-tabs {
+  margin-bottom: 12px;
+}
+.secret-control {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: 12px 0 16px;
+}
+.secret-control strong {
+  margin-right: auto;
+}
+.secret-value {
+  width: 100%;
+  padding: 8px 10px;
+  background: var(--panel2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow-wrap: anywhere;
+  user-select: all;
+  font-size: 13px;
+}
+@media (max-width: 760px) {
+  header {
+    height: auto;
+    min-height: 48px;
+    padding: 8px 12px;
+  }
+  main {
+    padding: 12px;
+  }
+  .card {
+    padding: 12px;
+  }
+  .page-heading {
+    gap: 8px;
+  }
+  .account-controls {
+    gap: 8px;
+  }
+  .account-controls .account-filters {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    flex-basis: 100%;
+  }
+  .account-controls .account-filters input {
+    grid-column: 1/-1;
+    max-width: none;
+    width: 100%;
+    min-width: 0;
+  }
+  .account-controls .account-filters select {
+    max-width: none;
+    width: 100%;
+    min-width: 0;
+  }
+  .account-controls button.btn,
+  .account-controls select,
+  .account-controls input,
+  .secret-control .btn {
+    min-height: 40px;
+  }
+}
+[hidden] {
+  display: none !important;
+}
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+button {
+  cursor: pointer;
+}
+button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.resource-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+.resource-heading h1 {
+  font-size: 22px;
+  margin: 0;
+}
+.resource-heading p {
+  margin: 6px 0 0;
+  color: var(--dim);
+}
+.resource-toolbar {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 10px 0;
+}
+.resource-toolbar input {
+  flex: 1;
+  min-width: 160px;
+}
+.resource-toolbar select {
+  max-width: 200px;
+}
+.resource-counts {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 0;
+}
+.resource-counts button {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel2);
+  padding: 8px 12px;
+  color: var(--fg);
+}
+.resource-table {
+  width: 100%;
+  min-width: 660px;
+}
+.resource-table th,
+.resource-table td {
+  padding: 7px 10px;
+  vertical-align: middle;
+}
+.resource-table td {
+  font-size: 14px;
+}
+.resource-table td:first-child,
+.resource-table th:first-child {
+  width: 44px;
+}
+input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.resource-name {
+  display: block;
+  color: var(--fg);
+  font-weight: 600;
+  text-align: left;
+  border: 0;
+  background: none;
+  padding: 4px 0;
+  overflow-wrap: anywhere;
+}
+.resource-name:hover {
+  color: var(--accent);
+}
+button.btn.resource-name {
+  border: 0;
+  background: none;
+  padding: 4px 0;
+  border-radius: 2px;
+}
+.resource-sub {
+  font-size: 12px;
+  color: var(--dim);
+  margin-top: 3px;
+  overflow-wrap: anywhere;
+}
+.numeric {
+  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, Consolas, monospace;
+}
+.bulk-bar {
+  position: sticky;
+  bottom: 12px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  background: var(--panel);
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  padding: 12px;
+  margin-top: 14px;
+  box-shadow: var(--shadow);
+}
+.bulk-bar strong {
+  margin-right: auto;
+}
+.resource-empty {
+  text-align: center;
+  padding: 36px !important;
+  color: var(--dim);
+}
+dialog.resource-dialog {
+  color: var(--fg);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  padding: 0;
+  border-radius: 14px;
+  width: min(520px, calc(100% - 32px));
+  max-height: 90dvh;
+  box-shadow: var(--shadow);
+}
+dialog.resource-dialog::backdrop {
+  background: rgba(10, 20, 40, 0.52);
+}
+dialog.drawer {
+  margin: 0 0 0 auto;
+  width: min(540px, 100%);
+  max-width: 100vw;
+  max-height: 100dvh;
+  height: 100dvh;
+  border-radius: 16px 0 0 16px;
+}
+dialog[open] {
+  animation: resource-enter 0.18s ease-out;
+}
+.dialog-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--line);
+}
+.dialog-head h2 {
+  font-size: 19px;
+  margin: 0;
+}
+.dialog-body {
+  padding: 16px 18px;
+  overflow-wrap: anywhere;
+}
+.dialog-body > p:first-child {
+  margin-top: 0;
+}
+.dialog-body input:not([type="checkbox"]),
+.dialog-body select,
+.dialog-body textarea {
+  width: 100%;
+}
+.dialog-body label {
+  display: block;
+  font-weight: 600;
+  margin: 18px 0 7px;
+}
+.dialog-body label:first-child {
+  margin-top: 0;
+}
+.dialog-body .field-help {
+  font-size: 12px;
+  color: var(--dim);
+  margin: 6px 0;
+}
+.dialog-body .field-error {
+  color: var(--err);
+  font-size: 13px;
+  min-height: 22px;
+  white-space: pre-wrap;
+}
+.dialog-actions {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  padding: 16px 24px;
+  background: var(--panel);
+  border-top: 1px solid var(--line);
+}
+.detail-grid {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr);
+  gap: 8px;
+  font-size: 13px;
+  margin: 0 0 14px;
+}
+.detail-grid dt {
+  color: var(--dim);
+}
+.detail-grid dd {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.resource-path {
+  border-left: 3px solid var(--accent);
+  padding: 10px 14px;
+  background: var(--panel2);
+  margin-bottom: 20px;
+  color: var(--dim);
+  font-size: 13px;
+}
+.resource-secret {
+  display: block;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: var(--panel2);
+  padding: 16px;
+  border-radius: 8px;
+  user-select: all;
+}
+.resource-result {
+  white-space: pre-wrap;
+  max-height: 260px;
+  overflow: auto;
+  background: var(--panel2);
+  padding: 12px;
+  border-radius: 8px;
+}
+.resource-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+.resource-tabs button[aria-pressed="true"] {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.task-layout {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+}
+.task-layout > * {
+  min-width: 0;
+}
+.task-layout .card {
+  margin: 0;
+}
+.task-layout .task-details {
+  grid-column: 1/-1;
+}
+.settings-draft {
+  color: var(--warn);
+  font-size: 13px;
+  margin: 12px 0;
+}
+.table-wrap {
+  max-width: 100%;
+}
+main > section,
+.card,
+.register-layout > * {
+  min-width: 0;
+}
+.mail-card .resource-table td:first-child {
+  width: 44px;
+}
+.mail-card .resource-table {
+  min-width: 0;
+}
+#tab-keys .resource-table th:first-child,
+#tab-keys .resource-table td:first-child {
+  width: auto;
+}
+.task-layout select,
+.task-layout input:not([type="checkbox"]) {
+  max-width: 100%;
+}
+.task-layout .google-status {
+  white-space: pre-line;
+}
+.task-layout .google-logs {
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+.task-layout .google-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 18px;
+}
+.task-layout .google-progress {
+  width: 100%;
+  margin: 16px 0;
+}
+.kpi-action {
+  cursor: pointer;
+  text-align: left;
+  color: var(--fg);
+}
+.kpi-action:hover {
+  border-color: var(--accent);
+}
+@keyframes resource-enter {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}
+@media (max-width: 760px) {
+  .task-layout {
+    grid-template-columns: 1fr;
+  }
+  .resource-heading {
+    align-items: flex-start;
+  }
+  .resource-heading h1 {
+    font-size: 22px;
+  }
+  .resource-heading p {
+    font-size: 13px;
+  }
+  .resource-table {
+    min-width: 0;
+    table-layout: fixed;
+  }
+  .resource-table .secondary {
+    display: none;
+  }
+  .resource-table th,
+  .resource-table td {
+    padding: 10px 5px;
+    overflow-wrap: anywhere;
+  }
+  .resource-table th:first-child,
+  .resource-table td:first-child {
+    width: 32px;
+  }
+  .resource-table th:last-child,
+  .resource-table td:last-child {
+    width: 60px;
+  }
+  .resource-table .balance-column {
+    width: 65px;
+  }
+  .resource-table .state-column {
+    width: 70px;
+  }
+  .resource-name {
+    font-size: 13px;
+  }
+  .resource-table .btn {
+    padding: 8px 4px;
+    min-height: 44px;
+  }
+  .resource-toolbar > * {
+    max-width: 100% !important;
+  }
+  .resource-toolbar input {
+    width: 100%;
+  }
+  .bulk-bar {
+    bottom: 4px;
+  }
+  .bulk-bar strong {
+    width: 100%;
+  }
+  .bulk-bar .btn {
+    min-height: 44px;
+  }
+  .drawer .dialog-body {
+    padding: 18px;
+  }
+  .dialog-head {
+    padding: 18px;
+  }
+  .resource-dialog input,
+  .resource-dialog select,
+  .resource-dialog textarea {
+    font-size: 16px;
+  }
+  .resource-tabs .btn {
+    min-height: 44px;
+  }
+  .account-filters {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+  .account-filters input {
+    grid-column: 1/-1;
+    width: 100%;
+  }
+  .account-filters select {
+    width: 100%;
+  }
+  .resource-counts {
+    gap: 6px;
+  }
+  .resource-counts button {
+    padding: 8px;
+  }
+  .resource-path {
+    font-size: 12px;
+  }
+}

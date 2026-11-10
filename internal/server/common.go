@@ -486,6 +486,9 @@ func (s *Server) nextAccount(r *http.Request) *deepai.Account {
 
 // clientFor 返回账号绑定的上游客户端（按代理缓存）。
 func (s *Server) clientFor(acct *deepai.Account) *deepai.Client {
+	if acct != nil && s.Egress.Config().Enabled && acct.Proxy == s.Egress.Config().ProxyURL {
+		return s.managedClient(s.Up)
+	}
 	if acct == nil || strings.TrimSpace(acct.Proxy) == "" {
 		return s.Up
 	}
@@ -498,6 +501,9 @@ func (s *Server) clientFor(acct *deepai.Account) *deepai.Client {
 		return c
 	}
 	c := deepai.NewClientWithProxy(acct.Proxy)
+	if s.Egress.Config().Enabled && s.Egress.Config().ProxyURL == acct.Proxy {
+		s.Egress.Guard(c.HTTP)
+	}
 	s.proxyClients[acct.Proxy] = c
 	return c
 }

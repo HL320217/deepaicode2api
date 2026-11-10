@@ -67,9 +67,12 @@ func TestGoogleConsoleImportAndTaskControls(t *testing.T) {
 		chromedp.Click("#loginSubmit", chromedp.ByQuery),
 		chromedp.WaitNotPresent("body.signed-out", chromedp.ByQuery),
 		chromedp.Click(`nav button[data-tab="register"]`, chromedp.ByQuery),
+		chromedp.Click(`button[data-provider="google"]`, chromedp.ByQuery),
 		chromedp.Evaluate(`document.querySelector('.google-import').open=true`, nil),
 		chromedp.SetUploadFiles("#googleFile", []string{file}, chromedp.ByQuery),
 		chromedp.Click("#googleImport", chromedp.ByQuery),
+		chromedp.WaitVisible("#confirmDialog[open]", chromedp.ByQuery),
+		chromedp.Click("#confirmAccept", chromedp.ByQuery),
 		chromedp.Poll(`document.querySelector('#googleImportStatus').textContent.includes('新增 2')`, nil),
 		chromedp.Poll(`!document.querySelector('#googleImport').disabled`, nil),
 	); err != nil {
@@ -87,6 +90,7 @@ func TestGoogleConsoleImportAndTaskControls(t *testing.T) {
 		t.Fatal(ctx.Err())
 	}
 	if err := chromedp.Run(ctx,
+		chromedp.Click(`nav button[data-tab="tasks"]`, chromedp.ByQuery),
 		chromedp.SetValue("#googleCount", "2", chromedp.ByQuery),
 		chromedp.Click("#googleStart", chromedp.ByQuery),
 		chromedp.Poll(`performance.getEntriesByType('resource').some(e => e.name.endsWith('/admin/api/google/start'))`, nil),

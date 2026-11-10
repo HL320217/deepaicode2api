@@ -16,6 +16,7 @@ import (
 
 	"deepaicode2api/internal/deepai"
 	"deepaicode2api/internal/register"
+	"deepaicode2api/internal/store"
 )
 
 // registerJob 是一次批量注册任务的运行状态。
@@ -211,6 +212,8 @@ func (s *Server) handleAdminRegister(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) startRegisterJob(w http.ResponseWriter, r *http.Request) {
+	s.graphImportMu.Lock()
+	defer s.graphImportMu.Unlock()
 	var body struct {
 		Count         int    `json:"count"`
 		Concurrency   int    `json:"concurrency"`
@@ -334,6 +337,14 @@ func (s *Server) runRegisterJob(ctx context.Context, job *registerJob, cfg *regi
 	defer func() { _ = ledger.Close() }()
 
 	pipe := register.New(register.Options{
+		NetworkSession:     s.Egress.Session,
+		BeforeRegistration: func(ctx context.Context) error { return s.Egress.PrepareRegistration(ctx, s.managedClient(s.Up)) },
+		QueryTheos:         s.registrationQuota,
+		WrapHTTP: func(c *http.Client) {
+			if s.Egress.Config().Enabled {
+				s.Egress.Guard(c)
+			}
+		},
 		Config:        cfg,
 		Provider:      provider,
 		Ledger:        ledger,
@@ -380,26 +391,14 @@ func (e localEnroller) MarkVerified(_ context.Context, accountID, email string) 
 
 // markAccountVerified 把账号标记为邮箱已验证（按 ID 或邮箱定位）。
 func (s *Server) markAccountVerified(id, email string) error {
-	var target *deepai.Account
-	if strings.TrimSpace(id) != "" {
-		target = s.Store.Account(strings.TrimSpace(id))
+	found, err := s.Store.MarkAccountVerifiedPersisted(id, email)
+	if err != nil {
+		return err
 	}
-	if target == nil && strings.TrimSpace(email) != "" {
-		for _, a := range s.Store.Accounts() {
-			if strings.EqualFold(a.Email, strings.TrimSpace(email)) {
-				target = a
-				break
-			}
-		}
+	if !found {
+		return store.ErrResourceNotFound
 	}
-	if target == nil {
-		return errors.New("账号不存在")
-	}
-	if target.EmailVerified {
-		return nil // 幂等
-	}
-	target.EmailVerified = true
-	return s.Store.Save()
+	return nil
 }
 
 // enrollRecord 把注册链路的结果写入号池（服务端内进程调用）。
@@ -453,30 +452,17 @@ func (s *Server) enrollRegistration(reg deepai.Registration, al *deepai.Allowanc
 		acct.Theos = al
 	}
 
-	isNew := s.Store.UpsertAccount(acct)
-	// Upsert 会保留旧运行态；把本次验证结果显式写回。
-	if stored := s.Store.Account(acct.ID); stored != nil {
-		stored.Status = "ok"
-		stored.Failures = 0
-		stored.LastErr = ""
-		stored.LastUsed = now
-		stored.LastVerified = now
-		stored.EmailVerified = reg.EmailVerified
-		stored.Plan = reg.Plan
-		if al != nil {
-			stored.Theos = al
-		}
-	}
-	if err := s.Store.Save(); err != nil {
+	id, isNew, err := s.Store.EnrollAccount(acct)
+	if err != nil {
 		return "", isNew, err
 	}
 
 	// 入池时的 0 额度可能稍后发生变化，安排有限次复探以更新缓存。
 	// 是否发放额度由上游决定；复探不修改设备标识或推算余额。
 	if al == nil || !positiveQuota(al) {
-		s.scheduleQuotaReprobe(acct.ID)
+		s.scheduleQuotaReprobe(id)
 	}
-	return acct.ID, isNew, nil
+	return id, isNew, nil
 }
 
 // positiveQuota 报告配额是否明确大于 0。
@@ -519,7 +505,7 @@ func (s *Server) scheduleQuotaReprobe(id string) {
 				return // 期间被别的路径探到了
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-			al, err := s.clientFor(a).Theos(ctx, a)
+			al, err := s.queryQuota(ctx, a)
 			cancel()
 			s.Store.SetAccountAllowance(id, al, err)
 			if err := s.Store.Save(); err != nil {
@@ -539,6 +525,9 @@ func (s *Server) graphMailPath() string {
 }
 
 func (s *Server) handleGraphMail(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	s.graphImportMu.Lock()
+	defer s.graphImportMu.Unlock()
 	path := s.graphMailPath()
 	switch r.Method {
 	case http.MethodGet:
@@ -564,14 +553,83 @@ func (s *Server) handleGraphMail(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"count": len(statuses), "accounts": statuses})
-	case http.MethodPost:
-		s.graphImportMu.Lock()
-		defer s.graphImportMu.Unlock()
+	case http.MethodPost, http.MethodDelete:
+		if s.graphPoolActive() {
+			writeErr(w, 409, "请先停止注册任务再维护邮箱", "invalid_request_error")
+			return
+		}
 		var body struct {
-			Content string `json:"content"`
+			Content      string   `json:"content"`
+			Preview      bool     `json:"preview"`
+			Action       string   `json:"action"`
+			Email        string   `json:"email"`
+			Password     string   `json:"password"`
+			ClientID     string   `json:"client_id"`
+			RefreshToken string   `json:"refresh_token"`
+			Emails       []string `json:"emails"`
 		}
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<20)).Decode(&body); err != nil {
 			writeErr(w, http.StatusBadRequest, "文件无效或超过 4 MB", "invalid_request_error")
+			return
+		}
+		if r.Method == http.MethodDelete || body.Action == "update" {
+			existing, err := os.ReadFile(path)
+			if err != nil && !errors.Is(err, os.ErrNotExist) {
+				writeErr(w, 500, "读取邮箱文件失败", "server_error")
+				return
+			}
+			lines := graphCredentialLines(string(existing))
+			if r.Method == http.MethodDelete {
+				emails, err := normalizeResourceEmails(body.Emails)
+				if err != nil {
+					writeErr(w, 400, err.Error(), "invalid_request_error")
+					return
+				}
+				removed := map[string]bool{}
+				for _, email := range emails {
+					removed[email] = false
+				}
+				remaining := make([]string, 0, len(lines))
+				for _, line := range lines {
+					email := graphCredentialEmail(line)
+					if _, ok := removed[email]; ok {
+						removed[email] = true
+					} else {
+						remaining = append(remaining, line)
+					}
+				}
+				if err := writeGraphCredentials(path, remaining); err != nil {
+					writeErr(w, 500, "保存失败，邮箱未删除", "server_error")
+					return
+				}
+				writeJSON(w, 200, mailboxDeleteResult(emails, removed))
+				return
+			}
+			body.Email = strings.ToLower(strings.TrimSpace(body.Email))
+			for _, value := range []string{body.Email, body.Password, body.ClientID, body.RefreshToken} {
+				if strings.ContainsAny(value, "\r\n\x00") || strings.Contains(value, "----") {
+					writeErr(w, 400, "邮箱凭据格式无效", "invalid_request_error")
+					return
+				}
+			}
+			if !strings.Contains(body.Email, "@") || strings.TrimSpace(body.ClientID) == "" || strings.TrimSpace(body.RefreshToken) == "" {
+				writeErr(w, 400, "请填写邮箱、客户端 ID 和刷新令牌", "invalid_request_error")
+				return
+			}
+			found := false
+			for _, line := range lines {
+				if graphCredentialEmail(line) == body.Email {
+					found = true
+					break
+				}
+			}
+			if !found {
+				writeErr(w, 404, "邮箱不存在", "invalid_request_error")
+				return
+			}
+			body.Content = strings.Join([]string{body.Email, body.Password, body.ClientID, body.RefreshToken}, "----")
+		} else if body.Action != "" {
+			writeErr(w, 400, "不支持的操作", "invalid_request_error")
 			return
 		}
 		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
@@ -635,12 +693,20 @@ func (s *Server) handleGraphMail(w http.ResponseWriter, r *http.Request) {
 		before := len(lines)
 		appendLines(body.Content)
 		count := len(lines)
+		if body.Preview {
+			writeJSON(w, 200, map[string]any{"count": count, "added": count - before, "updated": len(statuses) - (count - before)})
+			return
+		}
 		if err := os.WriteFile(f.Name(), []byte(strings.Join(lines, "\n")+"\n"), 0600); err != nil {
 			writeErr(w, http.StatusInternalServerError, "无法保存邮箱文件", "server_error")
 			return
 		}
 		if err := os.Rename(f.Name(), path); err != nil {
 			writeErr(w, http.StatusInternalServerError, "无法保存邮箱文件", "server_error")
+			return
+		}
+		if body.Action == "update" {
+			writeJSON(w, 200, map[string]bool{"ok": true})
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"count": count, "added": count - before, "updated": len(statuses) - (count - before)})

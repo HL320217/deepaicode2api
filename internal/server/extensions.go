@@ -143,7 +143,7 @@ func (s *Server) handleTheos(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := contextWithTimeout(r, 30*time.Second)
 	defer cancel()
-	al, err := s.clientFor(acct).Theos(ctx, acct)
+	al, err := s.queryQuota(ctx, acct)
 	if err != nil {
 		s.Store.MarkAccountResult(acct.ID, false, err.Error())
 		writeUpstreamErr(w, err)

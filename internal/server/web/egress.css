@@ -1,0 +1,13 @@
+.egress-status{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;padding:16px 0;margin-bottom:12px;border-bottom:1px solid var(--line,#d9ddd9)}
+.egress-status>div{display:flex;flex-direction:column;gap:6px;min-width:0}
+.egress-status strong{overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
+.egress-switches{display:flex;flex-wrap:wrap;gap:12px 28px;margin:12px 0 20px}
+.egress-switches label{display:flex;align-items:center;gap:8px;min-height:44px;margin:0;cursor:pointer}
+.egress-switches input{width:18px;height:18px;margin:0}
+#egressPanel .hint{margin-top:6px;line-height:1.6}
+#egressPanel details{margin-top:16px}
+#egressPanel summary{cursor:pointer;padding:10px 0;min-height:44px}
+.egress-actions{margin-top:18px;flex-wrap:wrap;gap:8px}
+.egress-actions .btn{min-height:44px}
+#egressMessage:empty{display:none}
+@media(max-width:680px){.egress-status{grid-template-columns:1fr;gap:12px}.egress-actions .btn{flex:1 1 140px}#egressPanel .grid2{grid-template-columns:1fr}}

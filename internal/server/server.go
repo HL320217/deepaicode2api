@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"log"
 	"net"
 	"net/http"
@@ -16,6 +17,7 @@ import (
 	"time"
 
 	"deepaicode2api/internal/deepai"
+	"deepaicode2api/internal/egress"
 	"deepaicode2api/internal/googleauth"
 	"deepaicode2api/internal/registry"
 	"deepaicode2api/internal/store"
@@ -23,8 +25,9 @@ import (
 
 // Server 是网关 HTTP 服务。
 type Server struct {
-	Store *store.Store
-	Up    *deepai.Client
+	Egress *egress.Manager
+	Store  *store.Store
+	Up     *deepai.Client
 	// Login 保存进行中的浏览器登录会话（内存态）。
 	Login       *loginSessions
 	Google      *googleTasks
@@ -43,8 +46,10 @@ type Server struct {
 
 // New 构造服务。
 func New(st *store.Store) *Server {
+	cfg, runtime := st.Egress()
 	return &Server{
-		Store: st, Up: deepai.NewClient(), Login: newLoginSessions(), Google: &googleTasks{},
+		Egress: egress.New(cfg, runtime, st.SaveEgress),
+		Store:  st, Up: deepai.NewClient(), Login: newLoginSessions(), Google: &googleTasks{},
 		Registers: newRegisterJobs(), proxyClients: map[string]*deepai.Client{},
 		quotaReprobeDelays: quotaReprobeDelays,
 	}
@@ -89,9 +94,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/admin/api/state", s.withAdminAuth(s.handleAdminState))
 	mux.HandleFunc("/admin/api/accounts", s.withAdminAuth(s.handleAdminAccounts))
 	mux.HandleFunc("/admin/api/keys", s.withAdminAuth(s.handleAdminKeys))
+	mux.HandleFunc("/admin/api/secrets", s.withAdminAuth(s.handleAdminSecret))
 	mux.HandleFunc("/admin/api/logs", s.withAdminAuth(s.handleAdminLogs))
 	mux.HandleFunc("/admin/api/stats", s.withAdminAuth(s.handleAdminStats))
 	mux.HandleFunc("/admin/api/settings", s.withAdminAuth(s.handleAdminSettings))
+	mux.HandleFunc("/admin/api/egress", s.withAdminAuth(s.handleEgress))
+	mux.HandleFunc("/admin/api/egress/action", s.withAdminAuth(s.handleEgressAction))
 	mux.HandleFunc("/admin/api/checkin", s.withAdminAuth(s.handleAdminCheckin))
 	mux.HandleFunc("/admin/api/models", s.withAdminAuth(s.handleAdminModels))
 	mux.HandleFunc("/admin/api/login/start", s.withAdminAuth(s.handleLoginStart))
@@ -154,7 +162,7 @@ func writeCORSHeaders(w http.ResponseWriter, allowed string) {
 	h.Set("Access-Control-Allow-Origin", allowed)
 	h.Set("Vary", "Origin")
 	h.Set("Access-Control-Allow-Headers", "Authorization, Content-Type, x-api-key, anthropic-version, anthropic-beta, X-Admin-Password, X-Session-Affinity")
-	h.Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+	h.Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
 	h.Set("Access-Control-Expose-Headers", "X-Request-Id, Retry-After")
 }
 
@@ -444,7 +452,7 @@ func (s *Server) handleAdminState(w http.ResponseWriter, r *http.Request) {
 	safeKeys := make([]map[string]any, 0, len(keys))
 	for _, k := range keys {
 		safeKeys = append(safeKeys, map[string]any{
-			"key": mask(k.Key), "name": k.Name, "group": k.Group, "enabled": k.Enabled,
+			"id": k.PublicID(), "key": mask(k.Key), "name": k.Name, "group": k.Group, "enabled": k.Enabled,
 			"created_at": k.CreatedAt, "last_used": k.LastUsed, "requests": k.Requests,
 		})
 	}
@@ -484,22 +492,25 @@ func (s *Server) handleAdminAccounts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Action        string `json:"action"`
-		ID            string `json:"id"`
-		Dir           string `json:"dir"`
-		APIKey        string `json:"api_key"`
-		Name          string `json:"name"`
-		Username      string `json:"username"`
-		Password      string `json:"password"`
-		Email         string `json:"email"`
-		SessionID     string `json:"session_id"`
-		CSRFToken     string `json:"csrftoken"`
-		Plan          string `json:"plan"`
-		Group         string `json:"group"`
-		UserPK        int64  `json:"user_pk"`
-		EmailVerified bool   `json:"email_verified"`
-		TheosBalance  string `json:"theos_balance"`
-		TheosGranted  string `json:"theos_granted"`
+		Action        string   `json:"action"`
+		IDs           []string `json:"ids"`
+		Operation     string   `json:"operation"`
+		Enabled       *bool    `json:"enabled"`
+		ID            string   `json:"id"`
+		Dir           string   `json:"dir"`
+		APIKey        string   `json:"api_key"`
+		Name          *string  `json:"name"`
+		Username      string   `json:"username"`
+		Password      string   `json:"password"`
+		Email         string   `json:"email"`
+		SessionID     string   `json:"session_id"`
+		CSRFToken     string   `json:"csrftoken"`
+		Plan          string   `json:"plan"`
+		Group         *string  `json:"group"`
+		UserPK        int64    `json:"user_pk"`
+		EmailVerified bool     `json:"email_verified"`
+		TheosBalance  string   `json:"theos_balance"`
+		TheosGranted  string   `json:"theos_granted"`
 		// SkipProbe 让调用方跳过入池时的 /theos 探测。
 		// 注册链路刚刚验活过并随请求带上了 theos_balance/granted，
 		// 再探一次既慢（~2s）又会引入全新的失败点。
@@ -518,7 +529,37 @@ func (s *Server) handleAdminAccounts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	name, group := "", ""
+	if body.Name != nil {
+		name = *body.Name
+	}
+	if body.Group != nil {
+		group = *body.Group
+	}
 	switch body.Action {
+	case "update":
+		if err := s.Store.UpdateAccountResource(body.ID, store.ResourceUpdate{Name: body.Name, Group: body.Group, Enabled: body.Enabled}); err != nil {
+			writeResourceError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	case "batch":
+		if body.Operation == "toggle" {
+			writeResourceError(w, store.ErrInvalidResource)
+			return
+		}
+		results, err := s.Store.BatchAccounts(body.IDs, body.Operation, group)
+		if err != nil {
+			writeResourceError(w, err)
+			return
+		}
+		succeeded := 0
+		for _, result := range results {
+			if result.OK {
+				succeeded++
+			}
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"results": results, "succeeded": succeeded, "failed": len(results) - succeeded})
 	case actionImport:
 		results, err := deepai.ImportAllFromDesktop(body.Dir)
 		if err != nil {
@@ -533,19 +574,25 @@ func (s *Server) handleAdminAccounts(w http.ResponseWriter, r *http.Request) {
 				"username": res.Account.Username, "path": res.Path, "new": isNew,
 			})
 		}
-		_ = s.Store.Save()
+		if err := s.Store.Save(); err != nil {
+			writeResourceError(w, err)
+			return
+		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "count": len(imported), "imported": imported})
 	case actionManual:
-		acct, err := deepai.AccountFromAPIKey(body.APIKey, body.Name, "manual", false)
+		acct, err := deepai.AccountFromAPIKey(body.APIKey, name, "manual", false)
 		if err != nil {
 			writeErr(w, http.StatusBadRequest, err.Error(), "invalid_request_error")
 			return
 		}
-		if strings.TrimSpace(body.Group) != "" {
-			acct.Group = strings.TrimSpace(body.Group)
+		if strings.TrimSpace(group) != "" {
+			acct.Group = strings.TrimSpace(group)
 		}
 		isNew := s.Store.UpsertAccount(acct)
-		_ = s.Store.Save()
+		if err := s.Store.Save(); err != nil {
+			writeResourceError(w, err)
+			return
+		}
 		go s.probeAndSave(acct)
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "new": isNew, "id": acct.ID})
 	case actionEnroll:
@@ -553,7 +600,7 @@ func (s *Server) handleAdminAccounts(w http.ResponseWriter, r *http.Request) {
 			Email: body.Email, Password: body.Password, Username: body.Username,
 			APIKey: body.APIKey, SessionID: body.SessionID, CSRFToken: body.CSRFToken,
 			UserPK: body.UserPK, Plan: body.Plan, EmailVerified: body.EmailVerified,
-			Group: body.Group, Proxy: body.Proxy, Fingerprint: body.Fingerprint,
+			Group: group, Proxy: body.Proxy, Fingerprint: body.Fingerprint,
 			MachineID: strings.TrimSpace(body.MachineID),
 			UserAgent: strings.TrimSpace(body.UserAgent), AcceptLanguage: strings.TrimSpace(body.AcceptLanguage),
 			SecCHUA: strings.TrimSpace(body.SecCHUA), Platform: strings.TrimSpace(body.Platform),
@@ -601,74 +648,49 @@ func (s *Server) handleAdminAccounts(w http.ResponseWriter, r *http.Request) {
 			"ok": true, "id": id, "new": isNew,
 			"email_verified": body.EmailVerified, "theos": al,
 		})
-	case actionRemove:
-		ok := s.Store.RemoveAccount(body.ID)
-		_ = s.Store.Save()
-		writeJSON(w, http.StatusOK, map[string]any{"ok": ok})
-	case actionToggle:
-		if a := s.Store.Account(body.ID); a != nil {
-			a.Enabled = !a.Enabled
-			_ = s.Store.Save()
+	case actionRemove, actionToggle, actionClearErrors:
+		results, err := s.Store.BatchAccounts([]string{body.ID}, body.Action, "")
+		if err != nil {
+			writeResourceError(w, err)
+			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
-	case actionClearErrors:
-		if a := s.Store.Account(body.ID); a != nil {
-			a.Failures = 0
-			a.Status = "unknown"
-			a.LastErr = ""
-			_ = s.Store.Save()
+		if !results[0].OK {
+			writeResourceError(w, store.ErrResourceNotFound)
+			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	case actionAssignMachine:
 		// 为存量账号补一个独立机器指纹。只补空值，不覆盖已有指纹
 		// （覆盖会让该账号已被上游记住的额度归属失效）。
-		assigned := 0
-		var targets []*deepai.Account
-		for _, a := range s.Store.Accounts() {
-			if body.ID != "" && a.ID != body.ID {
-				continue
-			}
-			if strings.TrimSpace(a.MachineID) != "" {
-				continue
-			}
-			a.MachineID = deepai.NewMachineUUID()
-			assigned++
-			targets = append(targets, a)
+		targets, err := s.Store.AssignAccountMachines(body.ID)
+		if err != nil {
+			writeResourceError(w, err)
+			return
 		}
-		_ = s.Store.Save()
+		assigned := len(targets)
 		// 重新探测配额，让调度能立即看到新指纹下的额度。
 		go s.probeAccounts(targets)
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "assigned": assigned})
 	case actionMarkVerified:
 		// 后台验证完成后回填：入池时 email_verified 可能还是 false。
 		if err := s.markAccountVerified(body.ID, body.Email); err != nil {
-			writeErr(w, http.StatusNotFound, err.Error(), "invalid_request_error")
+			writeResourceError(w, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	case actionSetGroup:
 		// 把账号迁到另一个分组（例如把压测批次的账号并入日常号池）。
 		// id 为空时按 from_group 批量迁移，便于整批归位。
-		target := strings.TrimSpace(body.Group)
+		target := strings.TrimSpace(group)
 		if target == "" {
 			writeErr(w, http.StatusBadRequest, "group 不能为空", "invalid_request_error")
 			return
 		}
-		moved := 0
-		for _, a := range s.Store.Accounts() {
-			if body.ID != "" && a.ID != body.ID {
-				continue
-			}
-			if body.FromGroup != "" && !strings.EqualFold(a.GroupName(), body.FromGroup) {
-				continue
-			}
-			if a.GroupName() == target {
-				continue
-			}
-			a.Group = target
-			moved++
+		moved, err := s.Store.MoveAccountGroup(body.ID, body.FromGroup, target)
+		if err != nil {
+			writeResourceError(w, err)
+			return
 		}
-		_ = s.Store.Save()
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "moved": moved, "group": target})
 	default:
 		writeErr(w, http.StatusBadRequest, "未知操作: "+body.Action, "invalid_request_error")
@@ -682,7 +704,7 @@ func (s *Server) handleAdminKeys(w http.ResponseWriter, r *http.Request) {
 		safe := make([]map[string]any, 0, len(keys))
 		for _, k := range keys {
 			safe = append(safe, map[string]any{
-				"key": mask(k.Key), "name": k.Name, "group": k.Group, "enabled": k.Enabled,
+				"id": k.PublicID(), "key": mask(k.Key), "name": k.Name, "group": k.Group, "enabled": k.Enabled,
 				"created_at": k.CreatedAt, "last_used": k.LastUsed, "requests": k.Requests,
 			})
 		}
@@ -692,20 +714,47 @@ func (s *Server) handleAdminKeys(w http.ResponseWriter, r *http.Request) {
 			Name  string `json:"name"`
 			Group string `json:"group"`
 		}
-		_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&body)
-		k := s.Store.AddKey(body.Name, body.Group)
-		_ = s.Store.Save()
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "key": k.Key})
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&body); err != nil {
+			writeResourceError(w, store.ErrInvalidResource)
+			return
+		}
+		k, err := s.Store.CreateKeyResource(body.Name, body.Group)
+		if err != nil {
+			writeResourceError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "id": k.PublicID(), "key": k.Key})
+	case http.MethodPatch:
+		var body struct {
+			ID string `json:"id"`
+			store.ResourceUpdate
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&body); err != nil {
+			writeResourceError(w, store.ErrInvalidResource)
+			return
+		}
+		if err := s.Store.UpdateKeyResource(body.ID, body.ResourceUpdate); err != nil {
+			writeResourceError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	case http.MethodDelete:
 		q := r.URL.Query()
-		if ref := q.Get("key"); ref != "" {
-			_ = s.Store.DeleteKey(s.resolveKeyRef(ref))
+		ref := q.Get("id")
+		toggle := false
+		if ref == "" {
+			ref = s.resolveKeyRef(q.Get("key"))
 		}
-		if ref := q.Get("toggle"); ref != "" {
-			_ = s.Store.ToggleKey(s.resolveKeyRef(ref))
+		if ref == "" && q.Get("toggle") != "" {
+			ref = s.resolveKeyRef(q.Get("toggle"))
+			toggle = true
 		}
-		_ = s.Store.Save()
+		if err := s.Store.DeleteKeyResource(ref, toggle); err != nil {
+			writeResourceError(w, err)
+			return
+		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+
 	default:
 		writeErr(w, http.StatusMethodNotAllowed, "不支持的方法", "invalid_request_error")
 	}
@@ -713,7 +762,10 @@ func (s *Server) handleAdminKeys(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleAdminLogs(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodDelete {
-		s.Store.ClearLogs()
+		if err := s.Store.ClearResourceHistory(false); err != nil {
+			writeResourceError(w, err)
+			return
+		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 		return
 	}
@@ -723,7 +775,10 @@ func (s *Server) handleAdminLogs(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleAdminStats(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodDelete {
-		s.Store.ClearStats()
+		if err := s.Store.ClearResourceHistory(true); err != nil {
+			writeResourceError(w, err)
+			return
+		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 		return
 	}
@@ -748,7 +803,7 @@ func (s *Server) handleAdminSettings(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "请求体解析失败", "invalid_request_error")
 		return
 	}
-	s.Store.UpdateSettings(func(st *store.Settings) {
+	err := s.Store.SaveSettings(func(st *store.Settings) {
 		if body.ModelAliases != nil {
 			st.ModelAliases = body.ModelAliases
 		}
@@ -771,7 +826,10 @@ func (s *Server) handleAdminSettings(w http.ResponseWriter, r *http.Request) {
 			st.FallbackModel = strings.TrimSpace(*body.FallbackModel)
 		}
 	})
-	_ = s.Store.Save()
+	if err != nil {
+		writeResourceError(w, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "settings": sanitizedSettings(s.Store.Settings())})
 }
 
@@ -790,6 +848,9 @@ func (s *Server) handleAdminCheckin(w http.ResponseWriter, r *http.Request) {
 		targets = nil
 		if a := s.Store.Account(body.ID); a != nil {
 			targets = append(targets, a)
+		} else {
+			writeResourceError(w, store.ErrResourceNotFound)
+			return
 		}
 	}
 
@@ -808,7 +869,7 @@ func (s *Server) handleAdminCheckin(w http.ResponseWriter, r *http.Request) {
 			defer wg.Done()
 			for a := range in {
 				ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
-				al, err := s.clientFor(a).Theos(ctx, a)
+				al, err := s.queryQuota(ctx, a)
 				cancel()
 				out <- checkinResult{account: a, theos: al, err: err}
 			}
@@ -842,7 +903,10 @@ func (s *Server) handleAdminCheckin(w http.ResponseWriter, r *http.Request) {
 			"ok": ok, "err": note, "theos": res.theos,
 		})
 	}
-	_ = s.Store.Save()
+	if err := s.Store.Save(); err != nil {
+		writeResourceError(w, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "results": results})
 }
 
@@ -878,7 +942,7 @@ func (s *Server) probeAccountQuota(acct *deepai.Account) (*deepai.Allowance, err
 			time.Sleep(time.Duration(attempt) * time.Second)
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-		al, err := s.clientFor(acct).Theos(ctx, acct)
+		al, err := s.queryQuota(ctx, acct)
 		cancel()
 		if err == nil {
 			return al, nil
@@ -915,7 +979,7 @@ func (s *Server) probeAccounts(accts []*deepai.Account) {
 			defer func() { <-sem }()
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 			defer cancel()
-			al, err := s.clientFor(a).Theos(ctx, a)
+			al, err := s.queryQuota(ctx, a)
 			s.Store.SetAccountAllowance(a.ID, al, err)
 		}(a)
 	}
@@ -981,4 +1045,16 @@ func statusOf(err error) int {
 		return http.StatusOK
 	}
 	return http.StatusBadGateway
+}
+
+// writeResourceError distinguishes caller errors from failed durable writes.
+func writeResourceError(w http.ResponseWriter, err error) {
+	status, kind, message := http.StatusInternalServerError, "server_error", "保存失败，请重试"
+	if errors.Is(err, store.ErrResourceNotFound) {
+		status, kind, message = http.StatusNotFound, "invalid_request_error", err.Error()
+	}
+	if errors.Is(err, store.ErrInvalidResource) {
+		status, kind, message = http.StatusBadRequest, "invalid_request_error", err.Error()
+	}
+	writeErr(w, status, message, kind)
 }

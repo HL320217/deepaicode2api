@@ -80,18 +80,63 @@ func (s *Server) handleGoogleAccounts(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		writeJSON(w, 200, map[string]any{"accounts": accounts, "encrypted": s.Store.MasterKeySet()})
-	case http.MethodPost:
+	case http.MethodPost, http.MethodDelete:
 		s.Google.mu.Lock()
 		defer s.Google.mu.Unlock()
 		if s.Google.activeLocked() {
-			writeErr(w, 409, "请先停止 Google 授权任务再导入", "invalid_request_error")
+			writeErr(w, 409, "请先停止 Google 授权任务再维护账号", "invalid_request_error")
 			return
 		}
 		var body struct {
-			Content string `json:"content"`
+			Content  string   `json:"content"`
+			Preview  bool     `json:"preview"`
+			Action   string   `json:"action"`
+			Email    string   `json:"email"`
+			Password string   `json:"password"`
+			Emails   []string `json:"emails"`
 		}
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<20)).Decode(&body); err != nil {
 			writeErr(w, 400, "文件无效或超过 4 MB", "invalid_request_error")
+			return
+		}
+		if r.Method == http.MethodDelete {
+			emails, err := normalizeResourceEmails(body.Emails)
+			if err != nil {
+				writeErr(w, 400, err.Error(), "invalid_request_error")
+				return
+			}
+			removed, err := s.Store.DeleteGoogleCredentials(emails)
+			if err != nil {
+				writeErr(w, 500, "保存失败，账号未删除", "server_error")
+				return
+			}
+			writeJSON(w, 200, mailboxDeleteResult(emails, removed))
+			return
+		}
+		if body.Action == "update" {
+			if strings.ContainsAny(body.Email+body.Password, "\r\n") || strings.ContainsAny(body.Email, "\t|") || strings.Contains(body.Email, "----") {
+				writeErr(w, 400, "邮箱或密码格式无效", "invalid_request_error")
+				return
+			}
+			parsed, err := googleauth.ParseAccounts(body.Email + "----" + body.Password)
+			if err != nil {
+				writeErr(w, 400, "邮箱或密码格式无效", "invalid_request_error")
+				return
+			}
+			found, err := s.Store.UpdateGoogleCredentials(parsed[0].Email, parsed[0].Password)
+			if err != nil {
+				writeErr(w, 500, "保存失败，账号未更新", "server_error")
+				return
+			}
+			if !found {
+				writeErr(w, 404, "Google 账号不存在", "invalid_request_error")
+				return
+			}
+			writeJSON(w, 200, map[string]bool{"ok": true})
+			return
+		}
+		if body.Action != "" {
+			writeErr(w, 400, "不支持的操作", "invalid_request_error")
 			return
 		}
 		credentials, err := googleauth.ParseAccounts(body.Content)
@@ -103,14 +148,14 @@ func (s *Server) handleGoogleAccounts(w http.ResponseWriter, r *http.Request) {
 		for i, c := range credentials {
 			accounts[i] = store.GoogleAccount{Email: c.Email, Password: c.Password}
 		}
-		added, updated := s.Store.MergeGoogleAccounts(accounts)
-		if err := s.Store.Save(); err != nil {
-			writeErr(w, 500, "账号已载入内存，但状态文件保存失败，请检查磁盘后重新导入", "server_error")
+		added, updated, count, err := s.Store.ImportGoogleAccounts(accounts, body.Preview)
+		if err != nil {
+			writeErr(w, 500, "状态文件保存失败，账号未导入", "server_error")
 			return
 		}
-		writeJSON(w, 200, map[string]any{"added": added, "updated": updated, "count": len(s.Store.GoogleAccounts())})
+		writeJSON(w, 200, map[string]any{"added": added, "updated": updated, "count": count})
 	default:
-		writeErr(w, 405, "仅支持 GET / POST", "invalid_request_error")
+		writeErr(w, 405, "仅支持 GET / POST / DELETE", "invalid_request_error")
 	}
 }
 
@@ -120,12 +165,21 @@ func (s *Server) handleGoogleStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Count       int  `json:"count"`
-		RetryFailed bool `json:"retry_failed"`
+		Count       int      `json:"count"`
+		RetryFailed bool     `json:"retry_failed"`
+		Emails      []string `json:"emails"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body); err != nil || body.Count < 1 || body.Count > 1000 {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&body); err != nil || body.Count < 1 || body.Count > 1000 {
 		writeErr(w, 400, "授权数量必须为 1–1000", "invalid_request_error")
 		return
+	}
+	if body.Emails != nil {
+		var err error
+		body.Emails, err = normalizeResourceEmails(body.Emails)
+		if err != nil {
+			writeErr(w, 400, err.Error(), "invalid_request_error")
+			return
+		}
 	}
 	idleTimeout, err := googleLoginIdleTimeout()
 	if err != nil {
@@ -148,7 +202,7 @@ func (s *Server) handleGoogleStart(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	accounts := s.Store.ReserveGoogleAccounts(body.Count, body.RetryFailed)
+	accounts := s.Store.ReserveGoogleAccounts(body.Count, body.RetryFailed, body.Emails...)
 	if len(accounts) == 0 {
 		writeErr(w, 400, "没有可用 Google 账号；失败账号需勾选重试", "invalid_request_error")
 		return
@@ -364,7 +418,7 @@ func (s *Server) enrollGoogle(ctx context.Context, email string, creds *deepai.C
 	if err := s.Store.Save(); err != nil {
 		return "", errors.New("无法保存 Google 账号设备标识，未查询配额")
 	}
-	al, err := s.Up.Theos(ctx, acct)
+	al, err := s.queryQuota(ctx, acct)
 	if err != nil {
 		return "", err
 	}

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	_ "embed"
 	"net/http"
 )
@@ -9,6 +10,27 @@ import (
 //
 //go:embed web/index.html
 var consoleHTML []byte
+
+// Resource modules remain embedded and inline: no network dependencies or build step.
+//
+//go:embed web/resources.js
+var resourceJS []byte
+
+//go:embed web/resources.css
+var resourceCSS []byte
+
+//go:embed web/egress.js
+var egressJS []byte
+
+//go:embed web/egress.css
+var egressCSS []byte
+
+func init() {
+	consoleHTML = bytes.Replace(consoleHTML, []byte("/* resource-styles */"), resourceCSS, 1)
+	consoleHTML = bytes.Replace(consoleHTML, []byte("</style>"), append(egressCSS, []byte("</style>")...), 1)
+	consoleHTML = bytes.Replace(consoleHTML, []byte("/* resource-controller */"), resourceJS, 1)
+	consoleHTML = bytes.Replace(consoleHTML, []byte("/* egress-controller */"), egressJS, 1)
+}
 
 // serveConsole 输出控制台单页。
 //

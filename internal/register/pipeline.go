@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"math/big"
+	"net/http"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -39,13 +40,17 @@ func (f EnrollerFunc) Enroll(ctx context.Context, rec *Record) (string, error) {
 
 // Options 是 Pipeline 的运行参数。
 type Options struct {
-	Config    *Config
-	Provider  Provider
-	Enroller  Enroller
-	Ledger    *Ledger
-	Group     string
-	Verify    bool
-	ProbeChat bool
+	NetworkSession     func(context.Context) (context.Context, string, func(), error)
+	BeforeRegistration func(context.Context) error
+	QueryTheos         func(context.Context, *deepai.Client, *deepai.Account) (*deepai.Allowance, error)
+	WrapHTTP           func(*http.Client)
+	Config             *Config
+	Provider           Provider
+	Enroller           Enroller
+	Ledger             *Ledger
+	Group              string
+	Verify             bool
+	ProbeChat          bool
 
 	// ProxyPool 为每个账号轮询分配代理；为空时使用 Config.Proxy。
 	ProxyPool *ProxyPool
@@ -100,7 +105,26 @@ func (p *Pipeline) RunOne(ctx context.Context, email, password string) *Record {
 // runOne 允许补跑时复用历史代理、指纹与机器指纹。
 func (p *Pipeline) runOne(ctx context.Context, email, password, proxyOverride, fpID, machineID string) *Record {
 	rec := NewRecord(email)
+	if p.opts.NetworkSession != nil {
+		next, proxy, release, err := p.opts.NetworkSession(ctx)
+		if err != nil {
+			rec.SetError("proxy", err)
+			return p.finish(rec)
+		}
+		defer release()
+		ctx = next
+		if proxy != "" {
+			proxyOverride = proxy
+			rec.ManagedProxy = true
+		}
+	}
 	rec.Group = p.effectiveGroup()
+	if p.opts.BeforeRegistration != nil {
+		if err := p.opts.BeforeRegistration(ctx); err != nil {
+			rec.SetError("proxy", err)
+			return p.finish(rec)
+		}
+	}
 	rec.Source = "register"
 	if strings.TrimSpace(password) == "" {
 		password = RandomPassword(18)
@@ -176,6 +200,9 @@ func (p *Pipeline) runOne(ctx context.Context, email, password, proxyOverride, f
 	}
 
 	web := NewWebClientWithFingerprint(p.opts.Config, fp, proxy)
+	if p.opts.WrapHTTP != nil {
+		p.opts.WrapHTTP(web.HTTP)
+	}
 
 	// 2) 预检：邮箱是否已存在（失败不阻断注册）
 	//
@@ -485,7 +512,13 @@ var theosRetryDelays = []time.Duration{time.Second, 3 * time.Second}
 
 // theosWithRetry 查询配额，瞬时错误退避重试；鉴权/参数错误直接返回。
 func theosWithRetry(ctx context.Context, up *deepai.Client, acct *deepai.Account) (*deepai.Allowance, error) {
-	al, err := up.Theos(ctx, acct)
+	return theosWithQuery(ctx, up, acct, func(ctx context.Context, up *deepai.Client, acct *deepai.Account) (*deepai.Allowance, error) {
+		return up.Theos(ctx, acct)
+	})
+}
+
+func theosWithQuery(ctx context.Context, up *deepai.Client, acct *deepai.Account, query func(context.Context, *deepai.Client, *deepai.Account) (*deepai.Allowance, error)) (*deepai.Allowance, error) {
+	al, err := query(ctx, up, acct)
 	if err == nil {
 		return al, nil
 	}
@@ -498,7 +531,7 @@ func theosWithRetry(ctx context.Context, up *deepai.Client, acct *deepai.Account
 			return nil, err
 		case <-time.After(delay):
 		}
-		al, err = up.Theos(ctx, acct)
+		al, err = query(ctx, up, acct)
 		if err == nil {
 			return al, nil
 		}
@@ -544,7 +577,13 @@ func (p *Pipeline) validate(ctx context.Context, rec *Record, up *deepai.Client)
 		UserAgent: rec.UserAgent, AcceptLanguage: rec.AcceptLanguage,
 		SecCHUA: rec.SecCHUA, Platform: rec.Platform,
 	}
-	al, err := theosWithRetry(vctx, up, acct)
+	var al *deepai.Allowance
+	var err error
+	if p.opts.QueryTheos != nil {
+		al, err = theosWithQuery(vctx, up, acct, p.opts.QueryTheos)
+	} else {
+		al, err = theosWithRetry(vctx, up, acct)
+	}
 	if err != nil {
 		return fmt.Errorf("Theos 验活失败: %w", err)
 	}
@@ -669,6 +708,20 @@ func (p *Pipeline) RunRecords(ctx context.Context, records []*Record, concurrenc
 // resumeWithKey 在只有 API Key 的情况下补验活 / 补入池。
 func (p *Pipeline) resumeWithKey(ctx context.Context, old *Record) *Record {
 	rec := cloneRecord(old)
+	if p.opts.NetworkSession != nil {
+		next, proxy, release, err := p.opts.NetworkSession(ctx)
+		if err != nil {
+			rec.SetError("proxy", err)
+			return p.finish(rec)
+		}
+		defer release()
+		ctx = next
+		if proxy != "" {
+			rec.Proxy = proxy
+			rec.ManagedProxy = true
+			rec.ProxyLabel = ProxyLabel(proxy)
+		}
+	}
 	rec.Group = firstNonEmpty(rec.Group, p.effectiveGroup())
 	if strings.TrimSpace(rec.Proxy) == "" && p.opts.ProxyPool != nil {
 		rec.Proxy = p.opts.ProxyPool.Next()
